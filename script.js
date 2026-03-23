@@ -65,8 +65,9 @@ if (canvas && window.THREE) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const resize = () => {
-    const width = canvas.clientWidth || canvas.parentElement.clientWidth;
-    const height = canvas.clientHeight || canvas.parentElement.clientHeight;
+    const stage = previewStage || canvas.parentElement;
+    const width = stage.clientWidth;
+    const height = stage.clientHeight;
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
@@ -237,4 +238,10 @@ if (canvas && window.THREE) {
   animate();
 
   window.addEventListener("resize", resize);
+} else if (previewStage) {
+  const message = document.createElement("p");
+  message.textContent = "3D preview unavailable (Three.js failed to load).";
+  message.style.padding = "24px";
+  message.style.color = "rgba(238, 242, 247, 0.7)";
+  previewStage.appendChild(message);
 }
