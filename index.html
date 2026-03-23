@@ -1,0 +1,66 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skyforge Drift</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="hero__branding">
+          <span class="chip">Playable Demo</span>
+          <h1>Skyforge Drift</h1>
+          <p class="lead">
+            Pilot your rogue mech through neon skies, harvest relic cores, and bend
+            gravity in a fast-paced roguelike adventure.
+          </p>
+        </div>
+        <div class="hero__actions">
+          <button class="start" type="button" id="startGame">Start Game</button>
+          <button class="ghost" type="button">Watch Trailer</button>
+        </div>
+      </header>
+
+      <section class="preview">
+        <div class="preview__copy">
+          <h2>Live Prototype Preview</h2>
+          <p>
+            Temporary 3D scene for testing. Use <strong>WASD</strong> to move the
+            player and <strong>IJKL</strong> to orbit the camera.
+          </p>
+        </div>
+        <div class="preview__stage">
+          <canvas id="scene"></canvas>
+        </div>
+      </section>
+
+      <section class="features">
+        <article>
+          <h3>Adaptive Combat</h3>
+          <p>Chain dash combos, gravity flips, and precision parries to survive.</p>
+        </article>
+        <article>
+          <h3>Living Cities</h3>
+          <p>Explore districts that evolve based on your choices.</p>
+        </article>
+        <article>
+          <h3>Relic Builds</h3>
+          <p>Craft builds by fusing relic cores and augmenting your mech.</p>
+        </article>
+      </section>
+
+      <section class="cta">
+        <div>
+          <h2>Ready to drift?</h2>
+          <p>Hit start to enter the prototype arena and sync your save data.</p>
+        </div>
+        <button class="start start--wide" type="button" id="startGameAlt">Start Game</button>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/three@0.162.0/build/three.min.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>
