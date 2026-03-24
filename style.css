@@ -88,6 +88,13 @@ button {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.link-button {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 button:focus {
   outline: 2px solid var(--cyan);
   outline-offset: 3px;

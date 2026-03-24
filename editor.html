@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tyron Studio</title>
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body>
+    <div class="editor">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__chip">TYRON</span>
+          <div>
+            <strong>Tyron Studio</strong>
+            <span>Web 3D Engine + Editor</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="playBtn">Play</button>
+          <button class="btn btn--ghost" id="stopBtn">Stop</button>
+          <div class="divider"></div>
+          <button class="btn btn--ghost" data-gizmo="translate">Move</button>
+          <button class="btn btn--ghost" data-gizmo="rotate">Rotate</button>
+          <button class="btn btn--ghost" data-gizmo="scale">Scale</button>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn--ghost" id="saveScene">Save</button>
+          <button class="btn btn--ghost" id="loadScene">Load</button>
+        </div>
+      </header>
+
+      <aside class="panel panel--left" id="hierarchy">
+        <div class="panel__header">
+          <h2>Hierarchy</h2>
+          <button class="btn btn--ghost btn--small" id="addEntity">Add</button>
+        </div>
+        <ul class="list" id="hierarchyList"></ul>
+      </aside>
+
+      <section class="viewport">
+        <canvas id="viewport"></canvas>
+        <div class="viewport__hud">
+          <span id="viewportStatus">Editor ready</span>
+        </div>
+      </section>
+
+      <aside class="panel panel--right" id="inspector">
+        <h2>Inspector</h2>
+        <div class="inspector" id="inspectorFields">
+          <p class="muted">Select an entity to edit its components.</p>
+        </div>
+      </aside>
+
+      <section class="panel panel--bottom" id="assets">
+        <div class="panel__header">
+          <h2>Asset Browser</h2>
+          <div class="toolbar">
+            <button class="btn btn--ghost btn--small" id="importFolderBtn">Import File</button>
+            <div class="pill">Drag into viewport (next)</div>
+          </div>
+        </div>
+        <input
+          type="file"
+          id="importFolder"
+          multiple
+          accept=".glb"
+          hidden
+        />
+        <div class="asset-section">
+          <div class="asset-section__header">
+            <h3>Uploaded</h3>
+            <span class="hint">Select a file to add it to the scene</span>
+          </div>
+          <ul class="uploaded-list" id="uploadedList"></ul>
+        </div>
+        <div class="asset-section">
+          <h3>Worlds</h3>
+          <div class="asset-grid" id="worldGrid"></div>
+        </div>
+        <div class="asset-section">
+          <h3>Assets</h3>
+          <div class="asset-grid" id="assetGrid"></div>
+        </div>
+      </section>
+
+      <section class="panel panel--code" id="codePanel">
+        <div class="panel__header">
+          <h2>Code</h2>
+          <div class="pill">Monaco embedded</div>
+        </div>
+        <div id="codeEditor" class="code-editor"></div>
+      </section>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./assets/vendor/three.module.js",
+          "three/addons/": "./assets/vendor/"
+        }
+      }
+    </script>
+    <script type="module" src="editor.js"></script>
+  </body>
+</html>

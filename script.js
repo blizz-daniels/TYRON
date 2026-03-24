@@ -1,13 +1,13 @@
-﻿const startButtons = [
+﻿import * as THREE from "three";
+import { GLTFLoader } from "three/addons/GLTFLoader.js";
+
+const startButtons = [
   document.getElementById("startGame"),
   document.getElementById("startGameAlt"),
 ];
 
 const previewSection = document.querySelector(".preview");
 const previewStage = document.querySelector(".preview__stage");
-const heroSection = document.querySelector(".hero");
-const featuresSection = document.querySelector(".features");
-const ctaSection = document.querySelector(".cta");
 const canvas = document.getElementById("scene");
 
 let isGameActive = false;
@@ -45,7 +45,22 @@ startButtons.forEach((button) => {
   });
 });
 
-if (canvas && window.THREE) {
+if (canvas) {
+  const statusTag = document.createElement("div");
+  statusTag.textContent = "Loading 3D preview...";
+  statusTag.style.position = "absolute";
+  statusTag.style.bottom = "12px";
+  statusTag.style.left = "12px";
+  statusTag.style.padding = "6px 12px";
+  statusTag.style.background = "rgba(8, 12, 22, 0.75)";
+  statusTag.style.border = "1px solid rgba(255, 255, 255, 0.2)";
+  statusTag.style.borderRadius = "999px";
+  statusTag.style.fontSize = "0.75rem";
+  statusTag.style.color = "rgba(238, 242, 247, 0.8)";
+  if (previewStage) {
+    previewStage.appendChild(statusTag);
+  }
+
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#090c15");
   scene.fog = new THREE.Fog("#090c15", 12, 30);
@@ -57,12 +72,22 @@ if (canvas && window.THREE) {
     100
   );
   camera.position.set(6, 4, 7);
+  camera.lookAt(0, 0.8, 0);
 
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    antialias: true,
-  });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  let renderer;
+  let rendererReady = true;
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+    });
+  } catch (error) {
+    statusTag.textContent = "WebGL unavailable. Check browser settings.";
+    console.error("WebGL renderer failed to initialize:", error);
+    rendererReady = false;
+  }
+  if (rendererReady) {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const resize = () => {
     const stage = previewStage || canvas.parentElement;
@@ -120,7 +145,7 @@ if (canvas && window.THREE) {
   beacon.position.set(3.6, 1.1, -2.2);
   scene.add(beacon);
 
-  const player = new THREE.Mesh(
+  let playerMesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.7, 1.2, 0.7),
     new THREE.MeshStandardMaterial({
       color: 0xfb5f86,
@@ -129,8 +154,8 @@ if (canvas && window.THREE) {
       roughness: 0.4,
     })
   );
-  player.position.set(-2, 0.6, 0);
-  scene.add(player);
+  playerMesh.position.set(-2, 0.6, 0);
+  scene.add(playerMesh);
 
   const platform = new THREE.Mesh(
     new THREE.CylinderGeometry(1.3, 1.6, 0.28, 32),
@@ -161,6 +186,84 @@ if (canvas && window.THREE) {
     obstacles.add(pillar);
   }
   scene.add(obstacles);
+
+  const worldModelPath = "assets/world/village.glb";
+  const spriteCandidates = [
+    "assets/player/character.png",
+    "assets/player/player.png",
+    "assets/player/sprite.png",
+    "assets/player/hero.png",
+    "assets/player/hero.webp",
+    "assets/player/hero.jpg",
+  ];
+
+  const gltfLoader = new GLTFLoader();
+  gltfLoader.load(
+    worldModelPath,
+    (gltf) => {
+      const world = gltf.scene;
+      const spawnMarker = world.getObjectByName("player");
+      world.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = false;
+          child.receiveShadow = false;
+        }
+      });
+      world.position.set(0, 0, 0);
+      world.scale.set(1.2, 1.2, 1.2);
+      scene.add(world);
+
+      scene.remove(worldCore);
+      scene.remove(beacon);
+      scene.remove(obstacles);
+      if (spawnMarker) {
+        const spawnPosition = new THREE.Vector3();
+        spawnMarker.getWorldPosition(spawnPosition);
+        playerMesh.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+        platform.position.set(spawnPosition.x, spawnPosition.y - 0.46, spawnPosition.z);
+      }
+      statusTag.textContent = "World loaded.";
+    },
+    undefined,
+    (error) => {
+      statusTag.textContent = "World failed to load. Check filename.";
+      console.warn("Failed to load world model:", error);
+    }
+  );
+
+  const textureLoader = new THREE.TextureLoader();
+  const tryLoadSprite = (index = 0) => {
+    if (index >= spriteCandidates.length) {
+      statusTag.textContent = "World loaded. No player sprite found.";
+      console.warn("No player sprite found in assets/player.");
+      return;
+    }
+
+    textureLoader.load(
+      spriteCandidates[index],
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const spriteMaterial = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+        });
+        const spritePlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.2, 1.8),
+          spriteMaterial
+        );
+        spritePlane.position.copy(playerMesh.position);
+        spritePlane.position.y = 0.9;
+        scene.remove(playerMesh);
+        playerMesh = spritePlane;
+        scene.add(playerMesh);
+      },
+      undefined,
+      () => {
+        tryLoadSprite(index + 1);
+      }
+    );
+  };
+  tryLoadSprite();
 
   const keys = new Set();
   const orbit = {
@@ -193,10 +296,10 @@ if (canvas && window.THREE) {
 
     if (direction.lengthSq() > 0) {
       direction.normalize();
-      player.position.addScaledVector(direction, moveSpeed * delta);
-      platform.position.x = player.position.x;
-      platform.position.z = player.position.z;
-      player.rotation.y = Math.atan2(direction.x, direction.z);
+      playerMesh.position.addScaledVector(direction, moveSpeed * delta);
+      platform.position.x = playerMesh.position.x;
+      platform.position.z = playerMesh.position.z;
+      playerMesh.rotation.y = Math.atan2(direction.x, direction.z);
     }
   };
 
@@ -213,14 +316,14 @@ if (canvas && window.THREE) {
     const y = orbit.radius * Math.cos(orbit.polar);
 
     camera.position.set(
-      player.position.x + x,
-      player.position.y + y + 1,
-      player.position.z + z
+      playerMesh.position.x + x,
+      playerMesh.position.y + y + 1,
+      playerMesh.position.z + z
     );
     camera.lookAt(
-      player.position.x,
-      player.position.y + 0.8,
-      player.position.z
+      playerMesh.position.x,
+      playerMesh.position.y + 0.8,
+      playerMesh.position.z
     );
   };
 
@@ -232,16 +335,20 @@ if (canvas && window.THREE) {
     if (isGameActive) {
       updateOrbit(delta);
     }
+
+    if (playerMesh.geometry.type === "PlaneGeometry") {
+      playerMesh.lookAt(
+        camera.position.x,
+        playerMesh.position.y,
+        camera.position.z
+      );
+    }
+
     renderer.render(scene, camera);
     requestAnimationFrame(animate);
   };
   animate();
 
-  window.addEventListener("resize", resize);
-} else if (previewStage) {
-  const message = document.createElement("p");
-  message.textContent = "3D preview unavailable (Three.js failed to load).";
-  message.style.padding = "24px";
-  message.style.color = "rgba(238, 242, 247, 0.7)";
-  previewStage.appendChild(message);
+    window.addEventListener("resize", resize);
+  }
 }

@@ -20,6 +20,7 @@
         <div class="hero__actions">
           <button class="start" type="button" id="startGame">Start Game</button>
           <button class="ghost" type="button">Watch Trailer</button>
+          <a class="ghost link-button" href="editor.html">Open Editor</a>
         </div>
       </header>
 
@@ -60,7 +61,14 @@
       </section>
     </main>
 
-    <script src="https://unpkg.com/three@0.162.0/build/three.min.js"></script>
-    <script src="script.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./assets/vendor/three.module.js",
+          "three/addons/": "./assets/vendor/"
+        }
+      }
+    </script>
+    <script type="module" src="script.js"></script>
   </body>
 </html>
