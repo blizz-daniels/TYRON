@@ -9,6 +9,7 @@ import {
   createCollider,
   createHitBox,
   createHurtBox,
+  createCamera,
   createGltf,
   ComponentType,
 } from "./src/engine/components.js";
@@ -21,6 +22,8 @@ const status = document.getElementById("viewportStatus");
 const addEntityButton = document.getElementById("addEntity");
 const importFolderButton = document.getElementById("importFolderBtn");
 const importFolderInput = document.getElementById("importFolder");
+const playButton = document.getElementById("playBtn");
+const stopButton = document.getElementById("stopBtn");
 const uploadedList = document.getElementById("uploadedList");
 const importedAssets = [];
 const worldAssets = [];
@@ -67,6 +70,7 @@ const colliderHelpers = new Map();
 const hitBoxHelpers = new Map();
 const hurtBoxHelpers = new Map();
 let selectedEntityId = null;
+let runtimeWindow = null;
 
 const rebuildHierarchy = () => {
   if (!hierarchyList) return;
@@ -140,6 +144,30 @@ function createEntity(name = "Entity") {
   }
 }
 
+const openRuntimeWindow = () => {
+  const data = serializeScene(world);
+  localStorage.setItem("tyronScene", JSON.stringify(data));
+  if (runtimeWindow && !runtimeWindow.closed) {
+    runtimeWindow.focus();
+    runtimeWindow.location.reload();
+  } else {
+    runtimeWindow = window.open("runtime.html", "_blank");
+  }
+  if (status) status.textContent = "Play mode: running in runtime preview.";
+  if (playButton) playButton.disabled = true;
+  if (stopButton) stopButton.disabled = false;
+};
+
+const closeRuntimeWindow = () => {
+  if (runtimeWindow && !runtimeWindow.closed) {
+    runtimeWindow.close();
+  }
+  runtimeWindow = null;
+  if (status) status.textContent = "Play mode: stopped.";
+  if (playButton) playButton.disabled = false;
+  if (stopButton) stopButton.disabled = true;
+};
+
 const addCollisionBoxToEntity = (entity) => {
   if (!entity || entity.components.has(ComponentType.Collider)) return;
   world.addComponent(entity, createCollider({ body: "static" }));
@@ -158,6 +186,13 @@ const addHurtBoxToEntity = (entity) => {
   if (!entity || entity.components.has(ComponentType.HurtBox)) return;
   world.addComponent(entity, createHurtBox());
   status.textContent = `Added hurt box to ${entity.name}.`;
+  rebuildInspector();
+};
+
+const addCameraToEntity = (entity) => {
+  if (!entity || entity.components.has(ComponentType.Camera)) return;
+  world.addComponent(entity, createCamera());
+  status.textContent = `Added camera to ${entity.name}.`;
   rebuildInspector();
 };
 
@@ -218,6 +253,14 @@ const rebuildInspector = () => {
     addHurtBtn.textContent = "Add Hurt Box";
     addHurtBtn.addEventListener("click", () => addHurtBoxToEntity(entity));
     addRow.appendChild(addHurtBtn);
+    hasAddButtons = true;
+  }
+  if (!entity.components.has(ComponentType.Camera)) {
+    const addCameraBtn = document.createElement("button");
+    addCameraBtn.className = "btn btn--ghost btn--small";
+    addCameraBtn.textContent = "Add Camera";
+    addCameraBtn.addEventListener("click", () => addCameraToEntity(entity));
+    addRow.appendChild(addCameraBtn);
     hasAddButtons = true;
   }
   if (hasAddButtons) {
@@ -290,6 +333,46 @@ const rebuildInspector = () => {
       hurtBox.offset[index] = value;
     });
     section.append(size.wrapper, offset.wrapper);
+    inspectorFields.appendChild(section);
+  }
+
+  const camera = entity.components.get(ComponentType.Camera);
+  if (camera) {
+    const section = document.createElement("div");
+    section.innerHTML = "<label>Camera</label>";
+    const fovField = buildVectorField("Fov / Near / Far", [camera.fov, camera.near, camera.far], (index, value) => {
+      if (index === 0) camera.fov = value;
+      if (index === 1) camera.near = value;
+      if (index === 2) camera.far = value;
+    });
+    if (!Array.isArray(camera.followOffset)) {
+      camera.followOffset = [0, 2, 5];
+    }
+    const followToggle = document.createElement("label");
+    followToggle.style.display = "flex";
+    followToggle.style.alignItems = "center";
+    followToggle.style.gap = "8px";
+    followToggle.style.textTransform = "none";
+    followToggle.style.letterSpacing = "0.02em";
+    const followInput = document.createElement("input");
+    followInput.type = "checkbox";
+    followInput.checked = Boolean(camera.lockToPlayer);
+    followInput.addEventListener("change", () => {
+      camera.lockToPlayer = followInput.checked;
+    });
+    const followText = document.createElement("span");
+    followText.textContent = "Lock camera to player";
+    followToggle.append(followInput, followText);
+
+    const offsetField = buildVectorField(
+      "Follow Offset",
+      camera.followOffset,
+      (index, value) => {
+        camera.followOffset[index] = value;
+      }
+    );
+
+    section.append(fovField.wrapper, followToggle, offsetField.wrapper);
     inspectorFields.appendChild(section);
   }
 };
@@ -406,6 +489,19 @@ if (loadButton) {
     const loaded = deserializeScene(data);
     setWorld(loaded);
     status.textContent = "Scene loaded.";
+  });
+}
+
+if (playButton) {
+  playButton.addEventListener("click", () => {
+    openRuntimeWindow();
+  });
+}
+
+if (stopButton) {
+  stopButton.disabled = true;
+  stopButton.addEventListener("click", () => {
+    closeRuntimeWindow();
   });
 }
 

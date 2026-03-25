@@ -21,6 +21,7 @@
       }
       main {
         height: calc(100vh - 56px);
+        position: relative;
       }
       canvas {
         width: 100%;
@@ -35,6 +36,30 @@
         border-radius: 999px;
         cursor: pointer;
       }
+      .controls {
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        display: grid;
+        grid-template-columns: 56px 56px 56px;
+        grid-template-rows: 56px 56px 56px;
+        gap: 8px;
+        pointer-events: auto;
+      }
+      .controls button {
+        border-radius: 16px;
+        background: rgba(10, 16, 28, 0.7);
+        font-weight: 600;
+      }
+      .controls button:active {
+        background: rgba(51, 209, 194, 0.25);
+        border-color: rgba(51, 209, 194, 0.6);
+      }
+      .controls .spacer {
+        pointer-events: none;
+        background: transparent;
+        border: none;
+      }
     </style>
   </head>
   <body>
@@ -44,12 +69,24 @@
     </header>
     <main>
       <canvas id="runtime"></canvas>
+      <div class="controls" aria-label="Movement controls">
+        <button class="spacer" tabindex="-1"></button>
+        <button data-move="forward">▲</button>
+        <button class="spacer" tabindex="-1"></button>
+        <button data-move="left">◀</button>
+        <button data-move="back">▼</button>
+        <button data-move="right">▶</button>
+        <button class="spacer" tabindex="-1"></button>
+        <button data-move="jump">⤒</button>
+        <button class="spacer" tabindex="-1"></button>
+      </div>
     </main>
 
     <script type="importmap">
       {
         "imports": {
-          "three": "./assets/vendor/three.module.js"
+          "three": "./assets/vendor/three.module.js",
+          "three/addons/": "./assets/vendor/"
         }
       }
     </script>

@@ -58,6 +58,8 @@ export const createCamera = (overrides = {}) => ({
   fov: overrides.fov ?? 60,
   near: overrides.near ?? 0.1,
   far: overrides.far ?? 200,
+  lockToPlayer: overrides.lockToPlayer ?? false,
+  followOffset: overrides.followOffset ?? [0, 2, 5],
 });
 
 export const createGltf = (overrides = {}) => ({
