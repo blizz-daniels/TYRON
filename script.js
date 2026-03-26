@@ -8,7 +8,23 @@ const startButtons = [
 
 const previewSection = document.querySelector(".preview");
 const previewStage = document.querySelector(".preview__stage");
+const previewStatus = document.getElementById("previewStatus");
 const canvas = document.getElementById("scene");
+let resizePreview = () => {};
+
+if (canvas) {
+  canvas.tabIndex = 0;
+  canvas.setAttribute(
+    "aria-label",
+    "Live 3D preview of the Tyronian mythic world"
+  );
+}
+
+const setPreviewStatus = (message) => {
+  if (previewStatus) {
+    previewStatus.textContent = message;
+  }
+};
 
 let isGameActive = false;
 let startGame = () => {
@@ -29,16 +45,19 @@ const enterGameMode = () => {
     canvas.focus({ preventScroll: true });
   }
 
+  setPreviewStatus("Preview focus active. WASD move, IJKL orbit.");
+  requestAnimationFrame(() => resizePreview());
   startGame();
 };
 
 startButtons.forEach((button) => {
   if (!button) return;
+  button.dataset.defaultLabel = button.textContent.trim();
   button.addEventListener("click", () => {
     button.textContent = "Starting...";
     button.disabled = true;
     setTimeout(() => {
-      button.textContent = "Start Game";
+      button.textContent = button.dataset.defaultLabel || "Start Game";
       button.disabled = false;
       enterGameMode();
     }, 400);
@@ -46,20 +65,7 @@ startButtons.forEach((button) => {
 });
 
 if (canvas) {
-  const statusTag = document.createElement("div");
-  statusTag.textContent = "Loading 3D preview...";
-  statusTag.style.position = "absolute";
-  statusTag.style.bottom = "12px";
-  statusTag.style.left = "12px";
-  statusTag.style.padding = "6px 12px";
-  statusTag.style.background = "rgba(8, 12, 22, 0.75)";
-  statusTag.style.border = "1px solid rgba(255, 255, 255, 0.2)";
-  statusTag.style.borderRadius = "999px";
-  statusTag.style.fontSize = "0.75rem";
-  statusTag.style.color = "rgba(238, 242, 247, 0.8)";
-  if (previewStage) {
-    previewStage.appendChild(statusTag);
-  }
+  setPreviewStatus("Loading mythic preview...");
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#090c15");
@@ -82,29 +88,43 @@ if (canvas) {
       antialias: true,
     });
   } catch (error) {
-    statusTag.textContent = "WebGL unavailable. Check browser settings.";
+    setPreviewStatus("WebGL unavailable. Check browser settings.");
     console.error("WebGL renderer failed to initialize:", error);
     rendererReady = false;
   }
   if (rendererReady) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  const resize = () => {
-    const stage = previewStage || canvas.parentElement;
-    const width = stage.clientWidth;
-    const height = stage.clientHeight;
-    renderer.setSize(width, height, false);
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-  };
-  resize();
+    const resize = () => {
+      const stage = previewStage || canvas.parentElement;
+      if (!stage) return;
+      const width = Math.max(stage.clientWidth, 1);
+      const height = Math.max(stage.clientHeight, 1);
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    };
+    resizePreview = resize;
+    resize();
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-  const keyLight = new THREE.DirectionalLight(0x7cf5e6, 1);
-  keyLight.position.set(6, 9, 5);
-  const fillLight = new THREE.PointLight(0xff9f6e, 0.9);
-  fillLight.position.set(-5, 4, -4);
-  scene.add(ambient, keyLight, fillLight);
+    if ("ResizeObserver" in window && previewStage) {
+      const observer = new ResizeObserver(() => resize());
+      observer.observe(previewStage);
+      window.addEventListener("beforeunload", () => observer.disconnect(), {
+        once: true,
+      });
+    } else {
+      window.addEventListener("resize", resize);
+    }
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const keyLight = new THREE.DirectionalLight(0x7cf5e6, 1);
+    keyLight.position.set(6, 9, 5);
+    const fillLight = new THREE.PointLight(0xff9f6e, 0.9);
+    fillLight.position.set(-5, 4, -4);
+    const skyLight = new THREE.HemisphereLight(0xffead1, 0x08111f, 0.7);
+    scene.add(ambient, keyLight, fillLight, skyLight);
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(30, 30, 30, 30),
@@ -189,13 +209,15 @@ if (canvas) {
 
   const worldModelPath = "assets/world/village.glb";
   const spriteCandidates = [
+    "assets/player/hero.png",
     "assets/player/character.png",
     "assets/player/player.png",
     "assets/player/sprite.png",
-    "assets/player/hero.png",
     "assets/player/hero.webp",
     "assets/player/hero.jpg",
   ];
+  let worldLoaded = false;
+  let portraitLoaded = false;
 
   const gltfLoader = new GLTFLoader();
   gltfLoader.load(
@@ -212,6 +234,7 @@ if (canvas) {
       world.position.set(0, 0, 0);
       world.scale.set(1.2, 1.2, 1.2);
       scene.add(world);
+      worldLoaded = true;
 
       scene.remove(worldCore);
       scene.remove(beacon);
@@ -222,11 +245,19 @@ if (canvas) {
         playerMesh.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
         platform.position.set(spawnPosition.x, spawnPosition.y - 0.46, spawnPosition.z);
       }
-      statusTag.textContent = "World loaded.";
+      setPreviewStatus(
+        portraitLoaded
+          ? "Mythic world loaded. Preview ready."
+          : "Mythic world loaded. Loading portrait..."
+      );
     },
     undefined,
     (error) => {
-      statusTag.textContent = "World failed to load. Check filename.";
+      setPreviewStatus(
+        portraitLoaded
+          ? "Fallback arena active. Preview ready."
+          : "World failed to load. Using the fallback arena."
+      );
       console.warn("Failed to load world model:", error);
     }
   );
@@ -234,7 +265,7 @@ if (canvas) {
   const textureLoader = new THREE.TextureLoader();
   const tryLoadSprite = (index = 0) => {
     if (index >= spriteCandidates.length) {
-      statusTag.textContent = "World loaded. No player sprite found.";
+      setPreviewStatus("Preview ready. No player portrait found.");
       console.warn("No player sprite found in assets/player.");
       return;
     }
@@ -256,6 +287,12 @@ if (canvas) {
         scene.remove(playerMesh);
         playerMesh = spritePlane;
         scene.add(playerMesh);
+        portraitLoaded = true;
+        setPreviewStatus(
+          worldLoaded
+            ? "Mythic world loaded. Preview ready."
+            : "Fallback arena active. Portrait loaded."
+        );
       },
       undefined,
       () => {
@@ -282,6 +319,7 @@ if (canvas) {
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", () => keys.clear());
 
   const moveSpeed = 4.2;
   const orbitSpeed = 1.6;
@@ -348,7 +386,5 @@ if (canvas) {
     requestAnimationFrame(animate);
   };
   animate();
-
-    window.addEventListener("resize", resize);
   }
 }

@@ -3,84 +3,339 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Tyron runtime preview for loading saved mythic scenes and testing player movement."
+    />
+    <meta name="theme-color" content="#090c15" />
     <title>Tyron Runtime</title>
     <style>
-      body {
-        margin: 0;
-        background: #090c15;
-        color: #e6ebf4;
-        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      :root {
+        color-scheme: dark;
+        --bg: #070a11;
+        --panel: rgba(11, 16, 27, 0.82);
+        --panel-strong: rgba(10, 15, 25, 0.94);
+        --text: #eef2f8;
+        --muted: rgba(238, 242, 248, 0.64);
+        --accent: #55e4da;
+        --accent-2: #ffb35a;
+        --stroke: rgba(255, 255, 255, 0.1);
+        --glow: rgba(85, 228, 218, 0.26);
+        font-family: "Manrope", "Segoe UI", sans-serif;
       }
-      header {
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, rgba(85, 228, 218, 0.16), transparent 28%),
+          radial-gradient(circle at 85% 10%, rgba(255, 179, 90, 0.14), transparent 26%),
+          linear-gradient(180deg, #0d1220 0%, #070a11 56%, #05070d 100%);
+        color: var(--text);
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 64px 64px;
+        opacity: 0.16;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 120%);
+      }
+
+      .runtime-app {
+        position: relative;
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 16px;
+        padding: 16px;
+      }
+
+      .topbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 12px 18px;
-        background: rgba(10, 16, 26, 0.9);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        gap: 16px;
+        padding: 14px 18px;
+        border-radius: 20px;
+        border: 1px solid var(--stroke);
+        background: rgba(9, 13, 22, 0.76);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+        z-index: 2;
       }
-      main {
-        height: calc(100vh - 56px);
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand__chip {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        background: linear-gradient(140deg, var(--accent), var(--accent-2));
+        color: #08121c;
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+      }
+
+      .brand strong,
+      .brand span {
+        display: block;
+      }
+
+      .brand strong {
+        font-size: 1rem;
+      }
+
+      .brand span {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button,
+      .ghost {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+        background: transparent;
+        color: var(--text);
+        padding: 10px 16px;
+        font: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+      }
+
+      button:hover,
+      .ghost:hover {
+        transform: translateY(-1px);
+        border-color: rgba(85, 228, 218, 0.55);
+      }
+
+      button:focus-visible,
+      .ghost:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+        transform: none;
+      }
+
+      .runtime {
         position: relative;
+        min-height: 0;
       }
-      canvas {
+
+      .runtime-stage {
+        position: relative;
+        height: 100%;
+        min-height: 0;
+        border-radius: 24px;
+        border: 1px solid var(--stroke);
+        overflow: hidden;
+        background: rgba(7, 10, 18, 0.8);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+      }
+
+      #runtime {
         width: 100%;
         height: 100%;
         display: block;
+        touch-action: none;
       }
-      button {
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        background: transparent;
-        color: #e6ebf4;
-        padding: 6px 14px;
-        border-radius: 999px;
-        cursor: pointer;
-      }
-      .controls {
+
+      .runtime__hud {
         position: absolute;
+        left: 16px;
         right: 16px;
         bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 14px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        border-radius: 18px;
+        background: rgba(7, 10, 18, 0.78);
+        border: 1px solid var(--stroke);
+        backdrop-filter: blur(14px);
+        pointer-events: none;
+      }
+
+      .runtime__hud strong {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 0.92rem;
+      }
+
+      .runtime__hud span,
+      .runtime__legend {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .runtime__legend {
+        max-width: 36ch;
+        text-align: right;
+      }
+
+      .controls {
+        position: absolute;
+        right: 20px;
+        bottom: 96px;
         display: grid;
         grid-template-columns: 56px 56px 56px;
         grid-template-rows: 56px 56px 56px;
         gap: 8px;
         pointer-events: auto;
       }
+
       .controls button {
-        border-radius: 16px;
-        background: rgba(10, 16, 28, 0.7);
-        font-weight: 600;
+        width: 56px;
+        height: 56px;
+        border-radius: 18px;
+        background: rgba(10, 16, 28, 0.72);
+        font-size: 1rem;
+        font-weight: 700;
       }
+
       .controls button:active {
-        background: rgba(51, 209, 194, 0.25);
-        border-color: rgba(51, 209, 194, 0.6);
+        background: rgba(85, 228, 218, 0.22);
+        border-color: rgba(85, 228, 218, 0.6);
       }
+
       .controls .spacer {
         pointer-events: none;
-        background: transparent;
+        opacity: 0;
         border: none;
+        background: transparent;
+      }
+
+      @media (max-width: 760px) {
+        body {
+          overflow: auto;
+        }
+
+        .runtime-app {
+          min-height: auto;
+          padding: 12px;
+        }
+
+        .topbar {
+          position: sticky;
+          top: 0;
+          flex-wrap: wrap;
+        }
+
+        .runtime-stage {
+          min-height: calc(100svh - 132px);
+        }
+
+        .controls {
+          right: 12px;
+          bottom: 104px;
+          transform: scale(0.9);
+          transform-origin: bottom right;
+        }
+
+        .runtime__hud {
+          left: 12px;
+          right: 12px;
+          bottom: 12px;
+        }
+
+        .runtime__legend {
+          max-width: none;
+          text-align: left;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto;
+          transition: none !important;
+        }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div>Tyron Runtime</div>
-      <button id="loadScene">Load Scene</button>
-    </header>
-    <main>
-      <canvas id="runtime"></canvas>
-      <div class="controls" aria-label="Movement controls">
-        <button class="spacer" tabindex="-1"></button>
-        <button data-move="forward">▲</button>
-        <button class="spacer" tabindex="-1"></button>
-        <button data-move="left">◀</button>
-        <button data-move="back">▼</button>
-        <button data-move="right">▶</button>
-        <button class="spacer" tabindex="-1"></button>
-        <button data-move="jump">⤒</button>
-        <button class="spacer" tabindex="-1"></button>
-      </div>
-    </main>
+    <div class="runtime-app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__chip">TYRON</span>
+          <div>
+            <strong>Tyron Runtime</strong>
+            <span id="runtimeStatus" aria-live="polite">Waiting for a saved scene...</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="loadScene" type="button">Load Scene</button>
+          <a class="ghost" href="index.html">Back to Demo</a>
+        </div>
+      </header>
+
+      <main class="runtime">
+        <section class="runtime-stage">
+          <canvas id="runtime" tabindex="0" aria-label="Tyron runtime viewport"></canvas>
+          <div class="runtime__hud">
+            <div>
+              <strong id="runtimeSceneLabel" aria-live="polite">Default sandbox world</strong>
+              <span>WASD or arrows move, Space jumps, tap the D-pad on mobile.</span>
+            </div>
+            <div class="runtime__legend">
+              Saved scenes are loaded from the browser localStorage key <code>tyronScene</code>.
+            </div>
+          </div>
+          <div class="controls" aria-label="Movement controls" role="group">
+            <button class="spacer" tabindex="-1" aria-hidden="true"></button>
+            <button data-move="forward" type="button" aria-label="Move forward">&#9650;</button>
+            <button class="spacer" tabindex="-1" aria-hidden="true"></button>
+            <button data-move="left" type="button" aria-label="Move left">&#9664;</button>
+            <button data-move="back" type="button" aria-label="Move backward">&#9660;</button>
+            <button data-move="right" type="button" aria-label="Move right">&#9654;</button>
+            <button class="spacer" tabindex="-1" aria-hidden="true"></button>
+            <button data-move="jump" type="button" aria-label="Jump">&#8679;</button>
+            <button class="spacer" tabindex="-1" aria-hidden="true"></button>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <script type="importmap">
       {

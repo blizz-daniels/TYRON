@@ -1,18 +1,12 @@
-const toQuaternion = (x, y, z) => {
-  const c1 = Math.cos(x / 2);
-  const c2 = Math.cos(y / 2);
-  const c3 = Math.cos(z / 2);
-  const s1 = Math.sin(x / 2);
-  const s2 = Math.sin(y / 2);
-  const s3 = Math.sin(z / 2);
+import * as THREE from "three";
 
-  return {
-    x: s1 * c2 * c3 + c1 * s2 * s3,
-    y: c1 * s2 * c3 - s1 * c2 * s3,
-    z: c1 * c2 * s3 + s1 * s2 * c3,
-    w: c1 * c2 * c3 - s1 * s2 * s3,
-  };
-};
+const toQuaternion = (x, y, z) =>
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
+
+const toEuler = (rotation) =>
+  new THREE.Euler().setFromQuaternion(
+    new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
+  );
 
 export class PhysicsSystem {
   constructor({ gravity = [0, -9.81, 0] } = {}) {
@@ -35,6 +29,17 @@ export class PhysicsSystem {
       z: this.gravity[2],
     });
     this.ready = true;
+  }
+
+  reset() {
+    this.bodies.clear();
+    if (this.rapier) {
+      this.world = new this.rapier.World({
+        x: this.gravity[0],
+        y: this.gravity[1],
+        z: this.gravity[2],
+      });
+    }
   }
 
   ensureBody(entity, transform, collider) {
@@ -129,7 +134,8 @@ export class PhysicsSystem {
       const position = body.translation();
       const rotation = body.rotation();
       transform.position = [position.x, position.y, position.z];
-      transform.rotation = [rotation.x, rotation.y, rotation.z];
+      const euler = toEuler(rotation);
+      transform.rotation = [euler.x, euler.y, euler.z];
     });
 
     Array.from(this.bodies.entries()).forEach(([id, body]) => {

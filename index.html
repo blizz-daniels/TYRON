@@ -1,63 +1,134 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Skyforge Drift</title>
+    <meta
+      name="description"
+      content="Tyronian Myths and Mythologies, a browser-native game engine and playable prototype surface."
+    />
+    <meta name="theme-color" content="#090c15" />
+    <title>Tyronian Myths and Mythologies</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main class="page">
-      <header class="hero">
-        <div class="hero__branding">
-          <span class="chip">Playable Demo</span>
-          <h1>Skyforge Drift</h1>
+      <section class="hero">
+        <div class="hero__copy">
+          <span class="chip">Tyronian Myths and Mythologies</span>
+          <p class="eyebrow">Browser-native action RPG engine</p>
+          <h1>Forge the myth, then step into the world you built.</h1>
           <p class="lead">
-            Pilot your rogue mech through neon skies, harvest relic cores, and bend
-            gravity in a fast-paced roguelike adventure.
+            Tyron is a browser-first engine for scene authoring, live previews, and
+            fast playtesting. Build the world, flip into runtime, and keep the loop
+            in one tab.
           </p>
-        </div>
-        <div class="hero__actions">
-          <button class="start" type="button" id="startGame">Start Game</button>
-          <button class="ghost" type="button">Watch Trailer</button>
-          <a class="ghost link-button" href="editor.html">Open Editor</a>
-        </div>
-      </header>
 
-      <section class="preview">
+          <div class="hero__actions">
+            <button class="start" type="button" id="startGame">Launch Prototype</button>
+            <a class="ghost link-button" href="runtime.html">Open Runtime</a>
+            <a class="ghost link-button" href="editor.html">Open Editor</a>
+          </div>
+
+          <div class="metric-row" aria-label="Project highlights">
+            <article class="metric-card">
+              <strong>01</strong>
+              <span>Live scene preview</span>
+            </article>
+            <article class="metric-card">
+              <strong>02</strong>
+              <span>Runtime and editor loop</span>
+            </article>
+            <article class="metric-card">
+              <strong>03</strong>
+              <span>Mythic world building</span>
+            </article>
+          </div>
+        </div>
+
+        <aside class="hero__panel">
+          <div class="panel-card panel-card--feature">
+            <span class="panel-card__label">Engine focus</span>
+            <h2>Scene sync, runtime play, and editor tools in one loop.</h2>
+            <p>
+              Load GLB worlds, author components, and keep the game state in sync
+              with the browser.
+            </p>
+          </div>
+
+          <div class="panel-stack">
+            <article class="panel-card">
+              <span class="panel-card__label">Scene system</span>
+              <strong>GLTF + primitives</strong>
+              <p>Worlds can be assembled from authored assets or fallback geometry.</p>
+            </article>
+            <article class="panel-card">
+              <span class="panel-card__label">Play loop</span>
+              <strong>Runtime preview</strong>
+              <p>Jump from layout to gameplay and test movement without leaving the site.</p>
+            </article>
+            <article class="panel-card">
+              <span class="panel-card__label">Iteration speed</span>
+              <strong>Editor ready</strong>
+              <p>Adjust transforms, load assets, and save scenes to local storage.</p>
+            </article>
+          </div>
+        </aside>
+      </section>
+
+      <section class="preview" aria-labelledby="previewTitle">
         <div class="preview__copy">
-          <h2>Live Prototype Preview</h2>
+          <p class="eyebrow">Engine snapshot</p>
+          <h2 id="previewTitle">Prototype arena</h2>
           <p>
-            Temporary 3D scene for testing. Use <strong>WASD</strong> to move the
-            player and <strong>IJKL</strong> to orbit the camera.
+            Use WASD to move and IJKL to orbit the camera. The canvas below is a
+            live scene preview tied to the current engine state.
           </p>
         </div>
+
         <div class="preview__stage">
-          <canvas id="scene"></canvas>
+          <canvas
+            id="scene"
+            tabindex="0"
+            aria-label="Live 3D preview of the Tyronian mythic world"
+          ></canvas>
+          <div class="preview__hud">
+            <span class="preview__status" id="previewStatus" aria-live="polite"
+              >Loading mythic preview...</span
+            >
+            <span class="preview__hint">WASD move - IJKL orbit - focus mode on Start</span>
+          </div>
         </div>
       </section>
 
       <section class="features">
         <article>
-          <h3>Adaptive Combat</h3>
-          <p>Chain dash combos, gravity flips, and precision parries to survive.</p>
+          <h3>Mythic Combat</h3>
+          <p>Chain dashes, parries, and relic-powered strikes into fast encounter loops.</p>
         </article>
         <article>
           <h3>Living Cities</h3>
-          <p>Explore districts that evolve based on your choices.</p>
+          <p>Districts and hubs can evolve as quests, choices, and lore layers stack up.</p>
         </article>
         <article>
-          <h3>Relic Builds</h3>
-          <p>Craft builds by fusing relic cores and augmenting your mech.</p>
+          <h3>Tooling Loop</h3>
+          <p>Editor, runtime, and preview stay close together so iteration never drifts.</p>
         </article>
       </section>
 
       <section class="cta">
         <div>
-          <h2>Ready to drift?</h2>
-          <p>Hit start to enter the prototype arena and sync your save data.</p>
+          <p class="eyebrow">Next step</p>
+          <h2>Ready to keep building the myth?</h2>
+          <p>
+            Reopen the preview, jump into runtime, or edit a scene without leaving the
+            project shell.
+          </p>
         </div>
-        <button class="start start--wide" type="button" id="startGameAlt">Start Game</button>
+        <div class="cta__actions">
+          <button class="start start--wide" type="button" id="startGameAlt">Refocus Preview</button>
+          <a class="ghost link-button" href="editor.html">Open Studio</a>
+        </div>
       </section>
     </main>
 

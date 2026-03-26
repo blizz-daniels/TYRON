@@ -604,7 +604,7 @@ if (assetGrid) {
       const lower = file.name.toLowerCase();
       if (!lower.endsWith(".gltf") && !lower.endsWith(".glb")) return;
       const url = URL.createObjectURL(file);
-      const name = file.name.replace(/\\.(gltf|glb)$/i, "");
+      const name = file.name.replace(/\.(gltf|glb)$/i, "");
       const asset = { name, type: "gltf", url };
       importedAssets.push(asset);
       const position = dropEvent ? getDropPosition(dropEvent) : [0, 0.5, 0];
@@ -646,7 +646,7 @@ if (importFolderButton && importFolderInput) {
     files.forEach((file) => {
       if (!file.name.toLowerCase().endsWith(".glb")) return;
       const url = URL.createObjectURL(file);
-      const name = file.name.replace(/\\.glb$/i, "");
+      const name = file.name.replace(/\.glb$/i, "");
       uploadedAssets.push({ name, url, size: file.size });
       worldAssets.push({ name, type: "world", url });
     });
