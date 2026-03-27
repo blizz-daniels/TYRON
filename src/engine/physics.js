@@ -18,9 +18,14 @@ export class PhysicsSystem {
   }
 
   async init() {
-    const rapier = await import(
+    const rapierModule = await import(
       "https://cdn.skypack.dev/@dimforge/rapier3d-compat"
     );
+    const rapier = rapierModule.default ?? rapierModule;
+    if (typeof rapier.init !== "function" || typeof rapier.World !== "function") {
+      throw new Error("Rapier module did not expose the expected compat API.");
+    }
+
     await rapier.init();
     this.rapier = rapier;
     this.world = new rapier.World({

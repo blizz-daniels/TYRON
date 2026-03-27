@@ -54,6 +54,7 @@ export const createPlayer = (overrides = {}) => ({
   type: ComponentType.Player,
   moveSpeed: overrides.moveSpeed ?? 3.4,
   jumpSpeed: overrides.jumpSpeed ?? 5.5,
+  enabled: overrides.enabled ?? true,
 });
 
 export const createScript = (overrides = {}) => ({
@@ -67,6 +68,7 @@ export const createCamera = (overrides = {}) => ({
   near: overrides.near ?? 0.1,
   far: overrides.far ?? 200,
   lockToPlayer: overrides.lockToPlayer ?? false,
+  lockTargetId: overrides.lockTargetId ?? null,
   followOffset: overrides.followOffset ?? [0, 2, 5],
 });
 

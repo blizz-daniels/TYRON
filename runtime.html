@@ -166,6 +166,28 @@
         transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
       }
 
+      select {
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+        background: rgba(10, 16, 28, 0.72);
+        color: var(--text);
+        padding: 10px 14px;
+        font: inherit;
+        cursor: pointer;
+        transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+      }
+
+      select:hover:not(:disabled),
+      select:focus-visible {
+        transform: translateY(-1px);
+        border-color: rgba(85, 228, 218, 0.55);
+      }
+
+      select:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
       button:hover,
       .ghost:hover {
         transform: translateY(-1px);
@@ -335,6 +357,10 @@
         </div>
         <div class="toolbar">
           <button id="loadScene" type="button">Load Scene</button>
+          <label class="ghost" style="display:flex;align-items:center;gap:10px;padding-right:12px;">
+            <span style="color:var(--muted);font-size:0.78rem;">Camera</span>
+            <select id="cameraSelect" aria-label="Choose active camera" disabled></select>
+          </label>
           <a class="ghost" href="index.html">Back to Demo</a>
         </div>
       </header>
@@ -345,7 +371,7 @@
           <div class="runtime__hud">
             <div>
               <strong id="runtimeSceneLabel" aria-live="polite">Default sandbox world</strong>
-              <span>WASD or arrows move, Space jumps, tap the D-pad on mobile.</span>
+              <span>WASD or arrows move, Space jumps, IJKL orbit the camera, tap the D-pad on mobile.</span>
             </div>
             <div class="runtime__legend">
               Saved scenes are loaded from the browser localStorage key <code>tyronScene</code>.

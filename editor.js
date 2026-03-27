@@ -23,6 +23,7 @@ const hierarchyList = document.getElementById("hierarchyList");
 const inspectorFields = document.getElementById("inspectorFields");
 const status = document.getElementById("viewportStatus");
 const addEntityButton = document.getElementById("addEntity");
+const addCameraEntityButton = document.getElementById("addCameraEntity");
 const importFolderButton = document.getElementById("importFolderBtn");
 const importFolderInput = document.getElementById("importFolder");
 const importSpriteFolderButton = document.getElementById("importSpriteFolderBtn");
@@ -161,7 +162,12 @@ function update(entity, dt, world, THREE, engine, api) {
   },
 ];
 
-const engine = new Engine({ canvas });
+const engine = new Engine({
+  canvas,
+  sceneSyncOptions: {
+    showCameraRig: true,
+  },
+});
 let world = new World();
 engine.setWorld(world);
 
@@ -570,26 +576,22 @@ const removeComponentFromEntity = (entity, componentType, statusMessage) => {
   rebuildInspector();
 };
 
-const addCameraToEntity = (entity) => {
-  if (!entity || entity.components.has(ComponentType.Camera)) return;
-  pushSceneHistory();
-  world.addComponent(entity, createCamera());
-  status.textContent = `Added camera to ${entity.name}.`;
-  rebuildInspector();
-};
-
 const makeEntityPlayablePlayer = (entity) => {
   if (!entity) return;
   pushSceneHistory();
   world.getEntities().forEach((otherEntity) => {
-    if (otherEntity.id !== entity.id) {
-      otherEntity.components.delete(ComponentType.Player);
+    const otherPlayer = otherEntity.components.get(ComponentType.Player);
+    if (otherEntity.id !== entity.id && otherPlayer) {
+      otherPlayer.enabled = false;
     }
   });
 
-  if (!entity.components.has(ComponentType.Player)) {
-    world.addComponent(entity, createPlayer());
+  let playerComponent = entity.components.get(ComponentType.Player);
+  if (!playerComponent) {
+    playerComponent = createPlayer();
+    world.addComponent(entity, playerComponent);
   }
+  playerComponent.enabled = true;
 
   const collider = entity.components.get(ComponentType.Collider);
   if (!collider) {
@@ -608,6 +610,118 @@ const makeEntityPlayablePlayer = (entity) => {
   status.textContent = `${entity.name} is now the playable character.`;
   rebuildHierarchy();
   rebuildInspector();
+};
+
+const removeEntityPlayablePlayer = (entity) => {
+  if (!entity) return;
+  const playerComponent = entity.components.get(ComponentType.Player);
+  if (!playerComponent) return;
+
+  pushSceneHistory();
+  playerComponent.enabled = false;
+
+  if (status) {
+    status.textContent = `${entity.name} is no longer the playable character.`;
+  }
+  rebuildInspector();
+};
+
+const cameraFollowPreview = new THREE.Object3D();
+
+const getEntityById = (entityId) =>
+  world.getEntities().find((item) => item.id === entityId) ?? null;
+
+const findScenePlayerEntity = () =>
+  world.getEntities().find((item) => {
+    const playerComponent = item.components.get(ComponentType.Player);
+    return playerComponent && playerComponent.enabled !== false;
+  }) ??
+  world
+    .getEntities()
+    .find(
+      (item) =>
+        item.name?.toLowerCase() === "player" &&
+        item.components.get(ComponentType.Player)?.enabled !== false
+    ) ??
+  null;
+
+const resolveCameraTargetEntity = (camera, cameraEntity = null) => {
+  const targetById = Number.isFinite(camera?.lockTargetId)
+    ? getEntityById(camera.lockTargetId)
+    : null;
+  if (targetById && targetById.id !== cameraEntity?.id) {
+    return targetById;
+  }
+
+  if (camera?.lockToPlayer) {
+    const playerEntity = findScenePlayerEntity();
+    if (playerEntity && playerEntity.id !== cameraEntity?.id) {
+      return playerEntity;
+    }
+  }
+
+  return null;
+};
+
+const syncCameraEntityToTarget = (entity) => {
+  const camera = entity?.components.get(ComponentType.Camera);
+  const transform = entity?.components.get(ComponentType.Transform);
+  if (!camera || !transform) return false;
+
+  const target = resolveCameraTargetEntity(camera, entity);
+  if (!target) return false;
+
+  const targetTransform = target.components.get(ComponentType.Transform);
+  if (!targetTransform) return false;
+
+  if (!Array.isArray(camera.followOffset)) {
+    camera.followOffset = [0, 2, 5];
+  }
+
+  const targetPosition = new THREE.Vector3(
+    targetTransform.position[0],
+    targetTransform.position[1],
+    targetTransform.position[2]
+  );
+  if (!Array.isArray(camera.followOffset) || camera.followOffset.length !== 3) {
+    camera.followOffset = [
+      transform.position[0] - targetPosition.x,
+      transform.position[1] - targetPosition.y,
+      transform.position[2] - targetPosition.z,
+    ];
+  }
+
+  const followOffset = new THREE.Vector3(
+    camera.followOffset[0] ?? 0,
+    camera.followOffset[1] ?? 0,
+    camera.followOffset[2] ?? 0
+  );
+  const desiredPosition = targetPosition.clone().add(followOffset);
+  transform.position = [desiredPosition.x, desiredPosition.y, desiredPosition.z];
+  return true;
+};
+
+const updateCameraEntityFollowers = () => {
+  world.getEntities().forEach((entity) => {
+    if (!entity.components.has(ComponentType.Camera)) return;
+    syncCameraEntityToTarget(entity);
+  });
+};
+
+const createCameraEntity = () => {
+  pushSceneHistory();
+  const entity = world.createEntity("Camera");
+  const cameraPosition = [0, 0.5, 0];
+
+  world.addComponent(
+    entity,
+    createTransform({ position: cameraPosition, rotation: [0, 0, 0] })
+  );
+  world.addComponent(entity, createCamera({ lockToPlayer: false, lockTargetId: null }));
+  selectEntity(entity.id);
+  if (status) {
+    status.textContent = "Created camera entity.";
+  }
 };
 
 const createDefaultSpriteBox = () => ({
@@ -1078,14 +1192,6 @@ const rebuildInspector = () => {
     addRow.appendChild(addHurtBtn);
     hasAddButtons = true;
   }
-  if (!entity.components.has(ComponentType.Camera)) {
-    const addCameraBtn = document.createElement("button");
-    addCameraBtn.className = "btn btn--ghost btn--small";
-    addCameraBtn.textContent = "Add Camera";
-    addCameraBtn.addEventListener("click", () => addCameraToEntity(entity));
-    addRow.appendChild(addCameraBtn);
-    hasAddButtons = true;
-  }
   if (!entity.components.has(ComponentType.Player)) {
     const makePlayerBtn = document.createElement("button");
     makePlayerBtn.className = "btn btn--ghost btn--small";
@@ -1288,29 +1394,75 @@ const rebuildInspector = () => {
   if (camera) {
     const section = document.createElement("div");
     section.innerHTML = "<label>Camera</label>";
-    const fovField = buildVectorField("Fov / Near / Far", [camera.fov, camera.near, camera.far], (index, value) => {
-      if (index === 0) camera.fov = value;
-      if (index === 1) camera.near = value;
-      if (index === 2) camera.far = value;
-    });
+    const fovField = buildVectorField(
+      "Fov / Near / Far",
+      [camera.fov, camera.near, camera.far],
+      (index, value) => {
+        if (index === 0) camera.fov = value;
+        if (index === 1) camera.near = value;
+        if (index === 2) camera.far = value;
+      }
+    );
     if (!Array.isArray(camera.followOffset)) {
       camera.followOffset = [0, 2, 5];
     }
-    const followToggle = document.createElement("label");
-    followToggle.style.display = "flex";
-    followToggle.style.alignItems = "center";
-    followToggle.style.gap = "8px";
-    followToggle.style.textTransform = "none";
-    followToggle.style.letterSpacing = "0.02em";
-    const followInput = document.createElement("input");
-    followInput.type = "checkbox";
-    followInput.checked = Boolean(camera.lockToPlayer);
-    followInput.addEventListener("change", () => {
-      camera.lockToPlayer = followInput.checked;
+    const targetRow = document.createElement("div");
+    targetRow.className = "row";
+    const targetLabel = document.createElement("label");
+    targetLabel.textContent = "Lock To";
+    const targetSelect = document.createElement("select");
+    const freeOption = document.createElement("option");
+    freeOption.value = "";
+    freeOption.textContent = "Free Camera";
+    targetSelect.appendChild(freeOption);
+    const currentTarget = resolveCameraTargetEntity(camera, entity);
+
+    const targetEntities = world
+      .getEntities()
+      .filter(
+        (item) => item.id !== entity.id && item.components.has(ComponentType.Transform)
+      );
+
+    targetEntities.forEach((target) => {
+      const option = document.createElement("option");
+      option.value = String(target.id);
+      option.textContent = target.name;
+      if (currentTarget && currentTarget.id === target.id) {
+        option.selected = true;
+      }
+      targetSelect.appendChild(option);
     });
-    const followText = document.createElement("span");
-    followText.textContent = "Lock camera to player";
-    followToggle.append(followInput, followText);
+
+    if (!currentTarget) {
+      freeOption.selected = true;
+    }
+
+    targetSelect.addEventListener("change", () => {
+      pushSceneHistory();
+      const selectedValue = targetSelect.value;
+      const target = selectedValue ? getEntityById(Number.parseInt(selectedValue, 10)) : null;
+      const cameraTransform = entity.components.get(ComponentType.Transform);
+      const targetTransform = target?.components.get(ComponentType.Transform) ?? null;
+      camera.lockTargetId = target?.id ?? null;
+      camera.lockToPlayer = Boolean(target);
+      if (target) {
+        if (cameraTransform && targetTransform) {
+          camera.followOffset = [
+            cameraTransform.position[0] - targetTransform.position[0],
+            cameraTransform.position[1] - targetTransform.position[1],
+            cameraTransform.position[2] - targetTransform.position[2],
+          ];
+        }
+        syncCameraEntityToTarget(entity);
+        if (status) {
+          status.textContent = `Camera locked to ${target.name}.`;
+        }
+      } else if (status) {
+        status.textContent = "Camera set to free mode.";
+      }
+      rebuildInspector();
+    });
+    targetRow.append(targetLabel, targetSelect);
 
     const offsetField = buildVectorField(
       "Follow Offset",
@@ -1320,7 +1472,7 @@ const rebuildInspector = () => {
       }
     );
 
-    section.append(fovField.wrapper, followToggle, offsetField.wrapper);
+    section.append(fovField.wrapper, targetRow, offsetField.wrapper);
     inspectorFields.appendChild(section);
   }
 
@@ -1334,6 +1486,19 @@ const rebuildInspector = () => {
     makePlayerButton.textContent = "Set As Playable Player";
     makePlayerButton.addEventListener("click", () => makeEntityPlayablePlayer(entity));
     section.appendChild(makePlayerButton);
+
+    const removePlayerButton = document.createElement("button");
+    removePlayerButton.className = "btn btn--ghost btn--small";
+    removePlayerButton.textContent = "Remove as Playable Character";
+    removePlayerButton.addEventListener("click", () => removeEntityPlayablePlayer(entity));
+    section.appendChild(removePlayerButton);
+
+    if (playerConfig.enabled === false) {
+      const inactive = document.createElement("p");
+      inactive.className = "muted";
+      inactive.textContent = "This entity is not currently set as the playable character.";
+      section.appendChild(inactive);
+    }
 
     const speedRow = document.createElement("div");
     speedRow.className = "row";
@@ -2023,6 +2188,12 @@ if (addEntityButton) {
   });
 }
 
+if (addCameraEntityButton) {
+  addCameraEntityButton.addEventListener("click", () => {
+    createCameraEntity();
+  });
+}
+
 const boxHelperFor = (entity, map, color) => {
   let helper = map.get(entity.id);
   if (!helper) {
@@ -2130,6 +2301,7 @@ const initMonaco = async () => {
 };
 
 const animate = () => {
+  updateCameraEntityFollowers();
   syncWorldToScene(
     engine.scene,
     engine.world,
@@ -2137,6 +2309,7 @@ const animate = () => {
     engine.gltfLoader,
     engine.gltfLoading,
     {
+      showCameraRig: true,
       skipTransformIds:
         isTransformingSelectedEntity && selectedEntityId ? [selectedEntityId] : [],
     }

@@ -15,7 +15,9 @@ const canvas = document.getElementById("runtime");
 const runtimeStatus = document.getElementById("runtimeStatus");
 const runtimeSceneLabel = document.getElementById("runtimeSceneLabel");
 const loadButton = document.getElementById("loadScene");
+const cameraSelect = document.getElementById("cameraSelect");
 const controls = document.querySelector(".controls");
+const CAMERA_SELECTION_STORAGE_KEY = "tyronRuntimeCameraId";
 
 if (canvas) {
   canvas.tabIndex = 0;
@@ -71,12 +73,29 @@ const inputState = {
   right: false,
   jump: false,
 };
+const orbitState = {
+  up: false,
+  down: false,
+  left: false,
+  right: false,
+  azimuth: Math.PI * 0.85,
+  polar: 1.15,
+  radius: 6.5,
+  focusHeight: 1.2,
+};
+const ORBIT_SPEED = 1.7;
+const ORBIT_POLAR_MIN = 0.4;
+const ORBIT_POLAR_MAX = Math.PI - 0.4;
+const ORBIT_RADIUS_MIN = 3;
+const ORBIT_RADIUS_MAX = 16;
 const movementState = {
   jumpPrimed: false,
 };
 
 let playerEntity = null;
 let activeCameraEntity = null;
+let selectedCameraEntityId = null;
+let activeCameraOrbitSignature = null;
 let playerControlEnabled = true;
 let triggerPairs = new Map();
 
@@ -353,9 +372,14 @@ const triggerSpriteAnimationByKey = (key) => {
 
 const findPlayerEntity = () => {
   const entities = world.getEntities();
+  const isPlayablePlayer = (entity) =>
+    entity.components.get(ComponentType.Player)?.enabled !== false;
+  const isExplicitlyDisabledPlayer = (entity) =>
+    entity.components.get(ComponentType.Player)?.enabled === false;
 
   for (const entity of entities) {
     if (
+      isPlayablePlayer(entity) &&
       entity.components.has(ComponentType.Player) &&
       entity.components.has(ComponentType.Transform)
     ) {
@@ -364,12 +388,18 @@ const findPlayerEntity = () => {
   }
 
   for (const entity of entities) {
+    if (isExplicitlyDisabledPlayer(entity)) {
+      continue;
+    }
     if (entity.name?.toLowerCase() === "player") {
       return entity;
     }
   }
 
   for (const entity of entities) {
+    if (isExplicitlyDisabledPlayer(entity)) {
+      continue;
+    }
     const name = entity.name?.toLowerCase() ?? "";
     if (
       name.includes("player") ||
@@ -381,6 +411,9 @@ const findPlayerEntity = () => {
   }
 
   for (const entity of entities) {
+    if (isExplicitlyDisabledPlayer(entity)) {
+      continue;
+    }
     const collider = entity.components.get(ComponentType.Collider);
     if (
       collider &&
@@ -395,6 +428,18 @@ const findPlayerEntity = () => {
   return null;
 };
 
+const findCameraEntityById = (preferredId = null) => {
+  if (!Number.isFinite(preferredId)) return null;
+  return (
+    world.getEntities().find(
+      (entity) =>
+        entity.id === preferredId &&
+        entity.components.has(ComponentType.Camera) &&
+        entity.components.has(ComponentType.Transform)
+    ) ?? null
+  );
+};
+
 const findCameraEntity = () => {
   for (const entity of world.getEntities()) {
     if (
@@ -407,6 +452,139 @@ const findCameraEntity = () => {
 
   return null;
 };
+
+const findEntityById = (entityId) =>
+  world.getEntities().find((entity) => entity.id === entityId) ?? null;
+
+const getCameraEntities = () =>
+  world
+    .getEntities()
+    .filter(
+      (entity) =>
+        entity.components.has(ComponentType.Camera) &&
+        entity.components.has(ComponentType.Transform)
+    );
+
+const getStoredCameraSelection = () => {
+  const raw = localStorage.getItem(CAMERA_SELECTION_STORAGE_KEY);
+  if (!raw) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const setStoredCameraSelection = (cameraId) => {
+  if (Number.isFinite(cameraId)) {
+    localStorage.setItem(CAMERA_SELECTION_STORAGE_KEY, String(cameraId));
+    return;
+  }
+  localStorage.removeItem(CAMERA_SELECTION_STORAGE_KEY);
+};
+
+const refreshCameraPicker = () => {
+  if (!cameraSelect) return;
+
+  const cameras = getCameraEntities();
+  cameraSelect.innerHTML = "";
+
+  const autoOption = document.createElement("option");
+  autoOption.value = "";
+  autoOption.textContent = "Auto";
+  cameraSelect.appendChild(autoOption);
+
+  cameras.forEach((entity) => {
+    const option = document.createElement("option");
+    option.value = String(entity.id);
+    option.textContent = entity.name || `Camera ${entity.id}`;
+    if (entity.id === selectedCameraEntityId) {
+      option.selected = true;
+    }
+    cameraSelect.appendChild(option);
+  });
+
+  if (!selectedCameraEntityId) {
+    autoOption.selected = true;
+  }
+  cameraSelect.disabled = false;
+};
+
+const applySelectedCamera = () => {
+  const preferredCameraId = getStoredCameraSelection();
+  const preferredCamera = findCameraEntityById(preferredCameraId);
+  activeCameraEntity = preferredCamera ?? findCameraEntity();
+
+  if (activeCameraEntity) {
+    selectedCameraEntityId = preferredCamera ? activeCameraEntity.id : null;
+    activeCameraOrbitSignature = null;
+    if (Number.isFinite(preferredCameraId) && !preferredCamera) {
+      setStoredCameraSelection(activeCameraEntity.id);
+    }
+    return activeCameraEntity;
+  }
+
+  selectedCameraEntityId = null;
+  activeCameraOrbitSignature = null;
+  if (Number.isFinite(preferredCameraId)) {
+    setStoredCameraSelection(null);
+  }
+  return null;
+};
+
+const resolveCameraTargetEntity = (camera) => {
+  const targetById = Number.isFinite(camera?.lockTargetId)
+    ? findEntityById(camera.lockTargetId)
+    : null;
+  if (targetById) {
+    return targetById;
+  }
+
+  if (camera?.lockToPlayer && playerEntity) {
+    return playerEntity;
+  }
+
+  return null;
+};
+
+const getLockedCameraOffset = (camera, cameraTransform, targetEntity) => {
+  if (Array.isArray(camera?.followOffset) && camera.followOffset.length === 3) {
+    return new THREE.Vector3(
+      Number.isFinite(camera.followOffset[0]) ? camera.followOffset[0] : 0,
+      Number.isFinite(camera.followOffset[1]) ? camera.followOffset[1] : 0,
+      Number.isFinite(camera.followOffset[2]) ? camera.followOffset[2] : 0
+    );
+  }
+
+  const targetTransform = targetEntity?.components.get(ComponentType.Transform);
+  if (targetTransform && cameraTransform?.position) {
+    return new THREE.Vector3(
+      cameraTransform.position[0] - targetTransform.position[0],
+      cameraTransform.position[1] - targetTransform.position[1],
+      cameraTransform.position[2] - targetTransform.position[2]
+    );
+  }
+
+  return new THREE.Vector3(0, 2, 5);
+};
+
+const syncOrbitStateToLockedCamera = (camera, cameraTransform, targetEntity) => {
+  const offset = getLockedCameraOffset(camera, cameraTransform, targetEntity);
+  const spherical = new THREE.Spherical().setFromVector3(offset);
+
+  orbitState.radius = Math.min(
+    Math.max(spherical.radius || orbitState.radius || ORBIT_RADIUS_MIN, ORBIT_RADIUS_MIN),
+    ORBIT_RADIUS_MAX
+  );
+  orbitState.polar = Math.min(
+    Math.max(spherical.phi || orbitState.polar, ORBIT_POLAR_MIN),
+    ORBIT_POLAR_MAX
+  );
+  orbitState.azimuth = Number.isFinite(spherical.theta) ? spherical.theta : orbitState.azimuth;
+  orbitState.focusHeight = 0;
+};
+
+const getCameraOrbitSignature = (camera, targetEntity) =>
+  `${activeCameraEntity?.id ?? "none"}:${targetEntity?.id ?? "none"}:${
+    Array.isArray(camera?.followOffset) ? camera.followOffset.join(",") : "no-offset"
+  }`;
 
 const resetMovementState = (transform) => {
   if (!transform) return;
@@ -430,12 +608,11 @@ const preparePlayer = () => {
 };
 
 const prepareCamera = () => {
-  activeCameraEntity = findCameraEntity();
+  applySelectedCamera();
+  refreshCameraPicker();
 };
 
 const applyCamera = () => {
-  const fallbackOffset = new THREE.Vector3(0, 2.3, 6.5);
-
   if (activeCameraEntity) {
     const camera = activeCameraEntity.components.get(ComponentType.Camera);
     const transform = activeCameraEntity.components.get(ComponentType.Transform);
@@ -452,30 +629,41 @@ const applyCamera = () => {
       engine.camera.updateProjectionMatrix();
     }
 
-    if (camera.lockToPlayer && playerEntity) {
-      const playerTransform = playerEntity.components.get(ComponentType.Transform);
-      if (playerTransform) {
-        if (!Array.isArray(camera.followOffset)) {
-          camera.followOffset = [0, 2, 5];
+    const targetEntity = resolveCameraTargetEntity(camera);
+    if (targetEntity) {
+      const targetTransform = targetEntity.components.get(ComponentType.Transform);
+      if (targetTransform) {
+        if (!Array.isArray(camera.followOffset) || camera.followOffset.length !== 3) {
+          camera.followOffset = [
+            transform.position[0] - targetTransform.position[0],
+            transform.position[1] - targetTransform.position[1],
+            transform.position[2] - targetTransform.position[2],
+          ];
         }
 
-        const offset = new THREE.Vector3(
-          camera.followOffset[0],
-          camera.followOffset[1],
-          camera.followOffset[2]
+        const followOffset = new THREE.Vector3(
+          camera.followOffset[0] ?? 0,
+          camera.followOffset[1] ?? 0,
+          camera.followOffset[2] ?? 0
         );
-        const playerPos = new THREE.Vector3(
-          playerTransform.position[0],
-          playerTransform.position[1],
-          playerTransform.position[2]
+        const desiredPosition = new THREE.Vector3(
+          targetTransform.position[0],
+          targetTransform.position[1],
+          targetTransform.position[2]
+        ).add(followOffset);
+
+        activeCameraOrbitSignature = null;
+        engine.camera.position.lerp(desiredPosition, 0.18);
+        engine.camera.rotation.set(
+          transform.rotation[0],
+          transform.rotation[1],
+          transform.rotation[2]
         );
-        const cameraPos = playerPos.clone().add(offset);
-        engine.camera.position.copy(cameraPos);
-        engine.camera.lookAt(playerPos);
         return;
       }
     }
 
+    activeCameraOrbitSignature = null;
     engine.camera.position.set(
       transform.position[0],
       transform.position[1],
@@ -507,17 +695,7 @@ const applyCamera = () => {
   }
 
   if (!fallbackTarget) return;
-  const playerTransform = fallbackTarget.components.get(ComponentType.Transform);
-  if (!playerTransform) return;
-
-  const playerPos = new THREE.Vector3(
-    playerTransform.position[0],
-    playerTransform.position[1],
-    playerTransform.position[2]
-  );
-  const cameraPos = playerPos.clone().add(fallbackOffset);
-  engine.camera.position.lerp(cameraPos, 0.18);
-  engine.camera.lookAt(playerPos);
+  applyOrbitCamera(fallbackTarget);
 };
 
 const buildScriptRunners = () => {
@@ -621,6 +799,10 @@ const updateMovement = (dt) => {
 const loadSceneFromStorage = ({ announce = true } = {}) => {
   const raw = localStorage.getItem("tyronScene");
   if (!raw) {
+    activeCameraEntity = null;
+    selectedCameraEntityId = null;
+    activeCameraOrbitSignature = null;
+    refreshCameraPicker();
     if (announce) {
       setRuntimeStatus("No saved scene found.");
     }
@@ -639,12 +821,19 @@ const loadSceneFromStorage = ({ announce = true } = {}) => {
     prepareCamera();
     ensureSpriteDefaults();
     setRuntimeSceneLabel("Loaded scene");
+    if (activeCameraEntity) {
+      setRuntimeSceneLabel(`Loaded scene - ${activeCameraEntity.name || "Camera"}`);
+    }
     if (announce) {
       setRuntimeStatus("Loaded scene from local storage.");
     }
     return loaded;
   } catch (error) {
     console.warn("Failed to load saved scene:", error);
+    activeCameraEntity = null;
+    selectedCameraEntityId = null;
+    activeCameraOrbitSignature = null;
+    refreshCameraPicker();
     if (announce) {
       setRuntimeStatus("Failed to load saved scene.");
     }
@@ -677,11 +866,63 @@ const setMoveState = (action, isActive) => {
   inputState[action] = isActive;
 };
 
+const setOrbitState = (action, isActive) => {
+  if (!(action in orbitState)) return;
+  orbitState[action] = isActive;
+};
+
+const updateCameraOrbit = (dt) => {
+  const step = ORBIT_SPEED * dt;
+  if (orbitState.left) {
+    orbitState.azimuth += step;
+  }
+  if (orbitState.right) {
+    orbitState.azimuth -= step;
+  }
+  if (orbitState.up) {
+    orbitState.polar = Math.max(ORBIT_POLAR_MIN, orbitState.polar - step);
+  }
+  if (orbitState.down) {
+    orbitState.polar = Math.min(ORBIT_POLAR_MAX, orbitState.polar + step);
+  }
+};
+
+const getOrbitTargetPosition = (targetEntity) => {
+  const transform = targetEntity?.components.get(ComponentType.Transform);
+  if (!transform) return null;
+  return new THREE.Vector3(
+    transform.position[0],
+    transform.position[1] + orbitState.focusHeight,
+    transform.position[2]
+  );
+};
+
+const applyOrbitCamera = (targetEntity, smoothing = 0.18) => {
+  const targetPos = getOrbitTargetPosition(targetEntity);
+  if (!targetPos) return false;
+
+  orbitState.radius = Math.min(Math.max(orbitState.radius, ORBIT_RADIUS_MIN), ORBIT_RADIUS_MAX);
+  orbitState.polar = Math.min(Math.max(orbitState.polar, ORBIT_POLAR_MIN), ORBIT_POLAR_MAX);
+
+  const offset = new THREE.Vector3().setFromSpherical(
+    new THREE.Spherical(orbitState.radius, orbitState.polar, orbitState.azimuth)
+  );
+  const desiredPosition = targetPos.clone().add(offset);
+  if (Number.isFinite(smoothing) && smoothing > 0) {
+    engine.camera.position.lerp(desiredPosition, smoothing);
+  } else {
+    engine.camera.position.copy(desiredPosition);
+  }
+  engine.camera.lookAt(targetPos);
+  return true;
+};
+
 const onKeyChange = (event, isActive) => {
   if (shouldIgnoreGameInput(event)) return;
 
   const key = event.key.toLowerCase();
-  if (isActive) {
+  const orbitKeys = ["i", "j", "k", "l"];
+  if (isActive && !orbitKeys.includes(key)) {
     triggerSpriteAnimationByKey(key);
   }
   const movementKeys = [
@@ -693,6 +934,10 @@ const onKeyChange = (event, isActive) => {
     "arrowleft",
     "d",
     "arrowright",
+    "i",
+    "j",
+    "k",
+    "l",
     " ",
     "spacebar",
   ];
@@ -705,6 +950,10 @@ const onKeyChange = (event, isActive) => {
   if (["s", "arrowdown"].includes(key)) setMoveState("back", isActive);
   if (["a", "arrowleft"].includes(key)) setMoveState("left", isActive);
   if (["d", "arrowright"].includes(key)) setMoveState("right", isActive);
+  if (key === "i") setOrbitState("up", isActive);
+  if (key === "k") setOrbitState("down", isActive);
+  if (key === "j") setOrbitState("left", isActive);
+  if (key === "l") setOrbitState("right", isActive);
 
   if (key === " " || key === "spacebar") {
     setMoveState("jump", isActive);
@@ -770,8 +1019,27 @@ if (loadButton) {
   });
 }
 
+if (cameraSelect) {
+  cameraSelect.addEventListener("change", () => {
+    const rawValue = cameraSelect.value;
+    const nextCameraId = rawValue ? Number.parseInt(rawValue, 10) : null;
+    setStoredCameraSelection(nextCameraId);
+    applySelectedCamera();
+    activeCameraOrbitSignature = null;
+    if (selectedCameraEntityId && activeCameraEntity) {
+      setRuntimeStatus(`Camera selected: ${activeCameraEntity.name}.`);
+      setRuntimeSceneLabel(`Loaded scene - ${activeCameraEntity.name || "Camera"}`);
+    } else {
+      setRuntimeStatus("Camera set to Auto.");
+      setRuntimeSceneLabel("Loaded scene");
+    }
+    applyCamera();
+  });
+}
+
 engine.addSystem((delta) => {
   updateMovement(delta);
+  updateCameraOrbit(delta);
   runScripts(delta);
 });
 engine.addSystem((delta) => {

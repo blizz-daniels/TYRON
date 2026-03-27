@@ -107,6 +107,7 @@ export const syncWorldToScene = (
   const entities = world.getEntities();
   const liveIds = new Set();
   const skipTransformIds = new Set(options.skipTransformIds ?? []);
+  const showCameraRig = Boolean(options.showCameraRig);
 
   const normalizeDisplaySize = (displaySize) => {
     if (!Array.isArray(displaySize) || displaySize.length !== 2) return [1, 1.6];
@@ -207,6 +208,69 @@ export const syncWorldToScene = (
     return holder;
   };
 
+  const ensureCameraRig = (entity, camera) => {
+    let holder = cache.get(entity.id);
+    if (holder && holder.userData.renderKind !== "camera") {
+      scene.remove(holder);
+      stopSpriteRuntime(holder);
+      disposeObject3D(holder);
+      cache.delete(entity.id);
+      holder = null;
+    }
+
+    if (!holder) {
+      holder = new THREE.Group();
+      holder.userData.entityId = entity.id;
+      holder.userData.renderKind = "camera";
+
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(0.35, 0.2, 0.22),
+        new THREE.MeshBasicMaterial({ color: 0x8ecbff, wireframe: false })
+      );
+      body.position.set(0, 0, 0);
+      body.userData.entityId = entity.id;
+
+      const lens = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.11, 0.2, 12),
+        new THREE.MeshBasicMaterial({ color: 0x8ecbff, wireframe: false })
+      );
+      lens.rotation.z = Math.PI / 2;
+      lens.position.set(0, 0, -0.24);
+      lens.userData.entityId = entity.id;
+
+      const previewCamera = new THREE.PerspectiveCamera(
+        camera.fov ?? 60,
+        1,
+        camera.near ?? 0.1,
+        camera.far ?? 200
+      );
+      previewCamera.position.set(0, 0, 0);
+      previewCamera.rotation.set(0, 0, 0);
+
+      const helper = new THREE.CameraHelper(previewCamera);
+      helper.userData.entityId = entity.id;
+      helper.material.transparent = true;
+      helper.material.opacity = 0.95;
+
+      holder.userData.previewCamera = previewCamera;
+      holder.userData.cameraHelper = helper;
+      holder.add(body, lens, helper);
+      scene.add(holder);
+      cache.set(entity.id, holder);
+    }
+
+    const previewCamera = holder.userData.previewCamera;
+    if (previewCamera) {
+      previewCamera.fov = camera.fov ?? 60;
+      previewCamera.near = camera.near ?? 0.1;
+      previewCamera.far = camera.far ?? 200;
+      previewCamera.updateProjectionMatrix();
+      holder.userData.cameraHelper?.update?.();
+    }
+
+    return holder;
+  };
+
   const syncSpriteMaterial = (holder, sprite) => {
     const spriteMesh = holder.userData.spriteMesh;
     if (!spriteMesh) return;
@@ -285,12 +349,32 @@ export const syncWorldToScene = (
     const mesh = entity.components.get(ComponentType.Mesh);
     const gltf = entity.components.get(ComponentType.Gltf);
     const sprite = entity.components.get(ComponentType.SpriteCharacter);
+    const camera = entity.components.get(ComponentType.Camera);
 
     if (!transform) return;
 
     if (sprite) {
       const holder = ensureSprite(entity, sprite);
       syncSpriteMaterial(holder, sprite);
+      if (skipTransformIds.has(entity.id)) return;
+      applyTransform(holder, transform);
+      return;
+    }
+
+    if (camera) {
+      if (!showCameraRig) {
+        const cached = cache.get(entity.id);
+        if (cached?.userData?.renderKind === "camera") {
+          scene.remove(cached);
+          stopSpriteRuntime(cached);
+          disposeObject3D(cached);
+          cache.delete(entity.id);
+        }
+        if (skipTransformIds.has(entity.id)) return;
+        return;
+      }
+
+      const holder = ensureCameraRig(entity, camera);
       if (skipTransformIds.has(entity.id)) return;
       applyTransform(holder, transform);
       return;
@@ -378,8 +462,9 @@ export const syncWorldToScene = (
 };
 
 export class Engine {
-  constructor({ canvas }) {
+  constructor({ canvas, sceneSyncOptions = {} }) {
     this.canvas = canvas;
+    this.sceneSyncOptions = sceneSyncOptions;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#090c15");
     this.clock = new THREE.Clock();
@@ -445,7 +530,8 @@ export class Engine {
         this.world,
         this.cache,
         this.gltfLoader,
-        this.gltfLoading
+        this.gltfLoading,
+        this.sceneSyncOptions
       );
     }
     this.renderer.render(this.scene, this.camera);
