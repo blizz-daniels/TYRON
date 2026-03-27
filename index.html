@@ -13,7 +13,25 @@
   </head>
   <body>
     <main class="page">
-      <section class="hero">
+      <header class="site-header">
+        <div class="site-header__brand">
+          <span class="chip chip--header">TYRON</span>
+          <div>
+            <strong>Tyronian Myths and Mythologies</strong>
+            <span>Browser-native action RPG engine</span>
+          </div>
+        </div>
+
+        <nav class="site-header__nav" aria-label="Project navigation">
+          <a href="#overview">Overview</a>
+          <a href="#navigation">Navigation</a>
+          <a href="#preview">Preview</a>
+          <a href="#tooling">Tooling</a>
+          <a href="#next">Next step</a>
+        </nav>
+      </header>
+
+      <section class="hero" id="overview">
         <div class="hero__copy">
           <span class="chip">Tyronian Myths and Mythologies</span>
           <p class="eyebrow">Browser-native action RPG engine</p>
@@ -76,7 +94,41 @@
         </aside>
       </section>
 
-      <section class="preview" aria-labelledby="previewTitle">
+      <section class="route-map" id="navigation" aria-labelledby="routeMapTitle">
+        <div class="section-header">
+          <p class="eyebrow">Navigation</p>
+          <h2 id="routeMapTitle">Move between the engine surfaces without losing your place.</h2>
+          <p>
+            The editor, runtime, and sprite creator stay organized as separate lanes, with the
+            landing page acting as a quick map for the whole project.
+          </p>
+        </div>
+
+        <div class="route-grid">
+          <article class="route-card">
+            <span class="route-card__index">01</span>
+            <h3>Editor</h3>
+            <p>Arrange entities, inspect components, and save scenes from a structured workspace.</p>
+            <a class="ghost link-button" href="editor.html">Open Editor</a>
+          </article>
+
+          <article class="route-card">
+            <span class="route-card__index">02</span>
+            <h3>Runtime</h3>
+            <p>Load a saved scene, move the player, and test gameplay in a clean playtest lane.</p>
+            <a class="ghost link-button" href="runtime.html">Open Runtime</a>
+          </article>
+
+          <article class="route-card">
+            <span class="route-card__index">03</span>
+            <h3>Sprite Creator</h3>
+            <p>Create character folders, align frames, and export animation clips in one pipeline.</p>
+            <a class="ghost link-button" href="sprite-creator.html">Open Sprite Tool</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="preview" id="preview" aria-labelledby="previewTitle">
         <div class="preview__copy">
           <p class="eyebrow">Engine snapshot</p>
           <h2 id="previewTitle">Prototype arena</h2>
@@ -101,7 +153,15 @@
         </div>
       </section>
 
-      <section class="features">
+      <section class="features" id="tooling" aria-labelledby="toolingTitle">
+        <div class="section-header section-header--full">
+          <p class="eyebrow">Tooling</p>
+          <h2 id="toolingTitle">Three layers keep the project easy to scan.</h2>
+          <p>
+            Combat, world building, and iteration tooling each get their own surface so the
+            project stays readable as it grows.
+          </p>
+        </div>
         <article>
           <h3>Mythic Combat</h3>
           <p>Chain dashes, parries, and relic-powered strikes into fast encounter loops.</p>
@@ -116,7 +176,7 @@
         </article>
       </section>
 
-      <section class="cta">
+      <section class="cta" id="next">
         <div>
           <p class="eyebrow">Next step</p>
           <h2>Ready to keep building the myth?</h2>

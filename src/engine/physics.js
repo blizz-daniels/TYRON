@@ -89,6 +89,51 @@ export class PhysicsSystem {
     this.bodies.set(entity.id, body);
   }
 
+  applyImpulse(entityId, impulse) {
+    const body = this.bodies.get(entityId);
+    if (!body || typeof body.applyImpulse !== "function") return false;
+
+    const vector = {
+      x: Number.isFinite(impulse?.x) ? impulse.x : Array.isArray(impulse) ? impulse[0] ?? 0 : 0,
+      y: Number.isFinite(impulse?.y) ? impulse.y : Array.isArray(impulse) ? impulse[1] ?? 0 : 0,
+      z: Number.isFinite(impulse?.z) ? impulse.z : Array.isArray(impulse) ? impulse[2] ?? 0 : 0,
+    };
+
+    body.applyImpulse(vector, true);
+    return true;
+  }
+
+  getBody(entityId) {
+    return this.bodies.get(entityId) ?? null;
+  }
+
+  getTranslation(entityId) {
+    const body = this.bodies.get(entityId);
+    if (!body || typeof body.translation !== "function") return null;
+    return body.translation();
+  }
+
+  getLinearVelocity(entityId) {
+    const body = this.bodies.get(entityId);
+    if (!body || typeof body.linvel !== "function") return null;
+    return body.linvel();
+  }
+
+  setLinearVelocity(entityId, velocity) {
+    const body = this.bodies.get(entityId);
+    if (!body || typeof body.setLinvel !== "function") return false;
+
+    body.setLinvel(
+      {
+        x: Number.isFinite(velocity?.x) ? velocity.x : 0,
+        y: Number.isFinite(velocity?.y) ? velocity.y : 0,
+        z: Number.isFinite(velocity?.z) ? velocity.z : 0,
+      },
+      true
+    );
+    return true;
+  }
+
   update(_delta, ecsWorld, componentType) {
     if (!this.ready) return;
     const liveIds = new Set();

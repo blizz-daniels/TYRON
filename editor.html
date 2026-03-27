@@ -27,8 +27,29 @@
         <div class="toolbar">
           <button class="btn btn--ghost" id="saveScene">Save</button>
           <button class="btn btn--ghost" id="loadScene">Load</button>
+          <button class="btn btn--ghost" id="undoScene" type="button">Undo</button>
+          <button class="btn btn--ghost" id="redoScene" type="button">Redo</button>
+          <button class="btn btn--ghost" id="createSpriteBtn">Create Sprite</button>
         </div>
       </header>
+
+      <section class="workspace-banner" aria-labelledby="workspaceTitle">
+        <div class="workspace-banner__copy">
+          <p class="eyebrow">Workspace map</p>
+          <h1 id="workspaceTitle">Keep the scene graph, inspector, assets, and code in one readable flow.</h1>
+          <p>
+            Use the jump links to move through the editor in a predictable order and stay
+            oriented while you build.
+          </p>
+        </div>
+        <nav class="workspace-banner__nav" aria-label="Editor sections">
+          <a href="#hierarchy">Hierarchy</a>
+          <a href="#viewportPanel">Viewport</a>
+          <a href="#inspector">Inspector</a>
+          <a href="#assets">Assets</a>
+          <a href="#codePanel">Code</a>
+        </nav>
+      </section>
 
       <aside class="panel panel--left" id="hierarchy">
         <div class="panel__header">
@@ -38,7 +59,7 @@
         <ul class="list" id="hierarchyList"></ul>
       </aside>
 
-      <section class="viewport">
+      <section class="viewport" id="viewportPanel">
         <canvas id="viewport"></canvas>
         <div class="viewport__hud">
           <span id="viewportStatus">Editor ready</span>
@@ -56,7 +77,8 @@
         <div class="panel__header">
           <h2>Asset Browser</h2>
           <div class="toolbar">
-            <button class="btn btn--ghost btn--small" id="importFolderBtn">Import File</button>
+            <button class="btn btn--ghost btn--small" id="importFolderBtn">Import World</button>
+            <button class="btn btn--ghost btn--small" id="importSpriteFolderBtn">Import Sprite Folders</button>
             <div class="pill">Drag into viewport (next)</div>
           </div>
         </div>
@@ -67,12 +89,28 @@
           accept=".glb"
           hidden
         />
+        <input
+          type="file"
+          id="importSpriteFolder"
+          multiple
+          accept=".mp4,.webm"
+          webkitdirectory
+          directory
+          hidden
+        />
         <div class="asset-section">
           <div class="asset-section__header">
             <h3>Uploaded</h3>
             <span class="hint">Select a file to add it to the scene</span>
           </div>
           <ul class="uploaded-list" id="uploadedList"></ul>
+        </div>
+        <div class="asset-section">
+          <div class="asset-section__header">
+            <h3>Sprite Characters</h3>
+            <span class="hint">Use /sprites/&lt;character&gt;/&lt;animation&gt;/&lt;clip&gt;.mp4 (webm fallback supported)</span>
+          </div>
+          <div class="sprite-browser" id="spriteBrowser"></div>
         </div>
         <div class="asset-section">
           <h3>Worlds</h3>
@@ -90,6 +128,13 @@
           <div class="pill">Monaco embedded</div>
         </div>
         <div id="codeEditor" class="code-editor"></div>
+        <div class="code-presets">
+          <div class="code-presets__header">
+            <h3>Trigger Presets</h3>
+            <span class="hint" id="triggerPresetHint">Select a trigger collider to unlock presets.</span>
+          </div>
+          <div class="preset-grid" id="triggerPresetButtons"></div>
+        </div>
       </section>
     </div>
 

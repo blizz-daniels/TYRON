@@ -6,9 +6,11 @@ import {
   createCollider,
   createHitBox,
   createHurtBox,
+  createPlayer,
   createScript,
   createCamera,
   createGltf,
+  createSpriteCharacter,
 } from "./components.js";
 
 const componentFactories = {
@@ -17,9 +19,11 @@ const componentFactories = {
   [ComponentType.Collider]: createCollider,
   [ComponentType.HitBox]: createHitBox,
   [ComponentType.HurtBox]: createHurtBox,
+  [ComponentType.Player]: createPlayer,
   [ComponentType.Script]: createScript,
   [ComponentType.Camera]: createCamera,
   [ComponentType.Gltf]: createGltf,
+  [ComponentType.SpriteCharacter]: createSpriteCharacter,
 };
 
 export const serializeScene = (world) => {

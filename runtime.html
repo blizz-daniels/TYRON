@@ -28,6 +28,8 @@
         box-sizing: border-box;
         margin: 0;
         padding: 0;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(85, 228, 218, 0.6) rgba(8, 12, 18, 0.56);
       }
 
       html,
@@ -38,6 +40,33 @@
           radial-gradient(circle at 85% 10%, rgba(255, 179, 90, 0.14), transparent 26%),
           linear-gradient(180deg, #0d1220 0%, #070a11 56%, #05070d 100%);
         color: var(--text);
+        scrollbar-gutter: stable;
+      }
+
+      *::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+
+      *::-webkit-scrollbar-track {
+        background: rgba(8, 12, 18, 0.5);
+        border-radius: 999px;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        border: 3px solid rgba(8, 12, 18, 0.5);
+        background:
+          linear-gradient(180deg, rgba(85, 228, 218, 0.92), rgba(255, 179, 90, 0.78));
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        background:
+          linear-gradient(180deg, rgba(85, 228, 218, 1), rgba(255, 179, 90, 0.9));
+      }
+
+      *::-webkit-scrollbar-corner {
+        background: rgba(8, 12, 18, 0.5);
       }
 
       body {
@@ -262,7 +291,7 @@
         }
 
         .runtime-stage {
-          min-height: calc(100svh - 132px);
+          min-height: calc(100svh - 92px);
         }
 
         .controls {
