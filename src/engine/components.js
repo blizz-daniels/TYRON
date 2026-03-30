@@ -1,3 +1,7 @@
+import {
+  normalizeSpriteCharacter,
+} from "./sprite-animation.js";
+
 export const ComponentType = Object.freeze({
   Transform: "transform",
   Mesh: "mesh",
@@ -80,54 +84,10 @@ export const createGltf = (overrides = {}) => ({
   receiveShadow: overrides.receiveShadow ?? false,
 });
 
-const normalizeSpriteBox = (box) => ({
-  size: Array.isArray(box?.size) && box.size.length === 3 ? [...box.size] : [1, 1, 0.2],
-  offset:
-    Array.isArray(box?.offset) && box.offset.length === 3 ? [...box.offset] : [0, 0, 0],
-});
-
-const normalizeSpriteClip = (clip) => ({
-  name: clip?.name ?? "clip",
-  url: clip?.url ?? "",
-  size: Number.isFinite(clip?.size) ? clip.size : 0,
-  relativePath: clip?.relativePath ?? "",
-});
-
-const normalizeSpriteAnimation = (animation) => ({
-  name: animation?.name ?? "idle",
-  clips: Array.isArray(animation?.clips)
-    ? animation.clips.map((clip) => normalizeSpriteClip(clip))
-    : [],
-  collision: normalizeSpriteBox(animation?.collision),
-  hitBox: normalizeSpriteBox(animation?.hitBox),
-  hurtBox: normalizeSpriteBox(animation?.hurtBox),
-  dedicatedKey:
-    typeof animation?.dedicatedKey === "string"
-      ? animation.dedicatedKey.trim().toLowerCase()
-      : "",
-});
-
 export const createSpriteCharacter = (overrides = {}) => {
-  const animations = Array.isArray(overrides.animations)
-    ? overrides.animations.map((animation) => normalizeSpriteAnimation(animation))
-    : [];
-
-  const idleAnimation =
-    animations.find((animation) => animation.name?.toLowerCase() === "idle")?.name ??
-    animations[0]?.name ??
-    "";
-  const defaultAnimation = overrides.defaultAnimation ?? idleAnimation;
-  const activeAnimation = overrides.activeAnimation ?? defaultAnimation;
-
+  const normalized = normalizeSpriteCharacter(overrides);
   return {
     type: ComponentType.SpriteCharacter,
-    characterName: overrides.characterName ?? "Sprite Character",
-    defaultAnimation,
-    activeAnimation,
-    displaySize:
-      Array.isArray(overrides.displaySize) && overrides.displaySize.length === 2
-        ? [...overrides.displaySize]
-        : [1, 1.6],
-    animations,
+    ...normalized,
   };
 };

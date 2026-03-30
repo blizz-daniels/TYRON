@@ -29,7 +29,6 @@
           <button class="btn btn--ghost" id="loadScene">Load</button>
           <button class="btn btn--ghost" id="undoScene" type="button">Undo</button>
           <button class="btn btn--ghost" id="redoScene" type="button">Redo</button>
-          <button class="btn btn--ghost" id="createSpriteBtn">Create Sprite</button>
         </div>
       </header>
 
@@ -94,7 +93,7 @@
           type="file"
           id="importSpriteFolder"
           multiple
-          accept=".mp4,.webm"
+          accept=".png,.json"
           webkitdirectory
           directory
           hidden
@@ -109,7 +108,7 @@
         <div class="asset-section">
           <div class="asset-section__header">
             <h3>Sprite Characters</h3>
-            <span class="hint">Use /sprites/&lt;character&gt;/&lt;animation&gt;/&lt;clip&gt;.mp4 (webm fallback supported)</span>
+            <span class="hint">Use /assets/&lt;character&gt;/&lt;animation&gt;/frame_001.png and animationName.json</span>
           </div>
           <div class="sprite-browser" id="spriteBrowser"></div>
         </div>

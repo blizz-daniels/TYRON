@@ -8,6 +8,11 @@ import {
   createPlayer,
   ComponentType,
 } from "../engine/components.js";
+import {
+  SpriteAnimator,
+  normalizeSpriteKey as normalizeSpriteAnimationKey,
+  resolveSpriteColliderForFrame,
+} from "../engine/sprite-animation.js";
 import { deserializeScene, serializeScene } from "../engine/scene-io.js";
 import { PhysicsSystem } from "../engine/physics.js";
 
@@ -98,9 +103,6 @@ let selectedCameraEntityId = null;
 let activeCameraOrbitSignature = null;
 let playerControlEnabled = true;
 let triggerPairs = new Map();
-
-const normalizeSpriteKey = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const isEntityLike = (value) => Boolean(value && value.components instanceof Map);
 
@@ -349,11 +351,17 @@ const ensureSpriteDefaults = () => {
     if (!sprite.activeAnimation) {
       sprite.activeAnimation = sprite.defaultAnimation;
     }
+    if (!Number.isFinite(sprite.activeFrameIndex)) {
+      sprite.activeFrameIndex = 0;
+    }
+    if (typeof sprite.playing !== "boolean") {
+      sprite.playing = true;
+    }
   });
 };
 
 const triggerSpriteAnimationByKey = (key) => {
-  const normalized = normalizeSpriteKey(key);
+  const normalized = normalizeSpriteAnimationKey(key);
   if (!normalized) return false;
 
   let triggered = false;
@@ -361,13 +369,109 @@ const triggerSpriteAnimationByKey = (key) => {
     const sprite = entity.components.get(ComponentType.SpriteCharacter);
     if (!sprite || !Array.isArray(sprite.animations)) return;
     const match = sprite.animations.find(
-      (animation) => normalizeSpriteKey(animation.dedicatedKey) === normalized
+      (animation) => normalizeSpriteAnimationKey(animation.dedicatedKey) === normalized
     );
     if (!match) return;
     sprite.activeAnimation = match.name;
+    sprite.activeFrameIndex = 0;
+    sprite.playing = true;
     triggered = true;
   });
   return triggered;
+};
+
+const spriteState = new Map();
+
+const spriteAnimationSignature = (sprite) =>
+  Array.isArray(sprite?.animations)
+    ? sprite.animations
+        .map((animation) =>
+          [
+            animation?.name ?? "",
+            animation?.fps ?? 0,
+            animation?.loop === false ? 0 : 1,
+            Array.isArray(animation?.frames)
+              ? animation.frames
+                  .map((frame) => frame?.source ?? frame?.relativePath ?? frame?.name ?? "")
+                  .join("|")
+              : "",
+          ].join(":")
+        )
+        .join("||")
+    : "";
+
+const ensureSpriteState = (entity, sprite) => {
+  const signature = spriteAnimationSignature(sprite);
+  let state = spriteState.get(entity.id);
+  if (!state || state.signature !== signature) {
+    state = {
+      signature,
+      animator: new SpriteAnimator({
+        animations: sprite.animations,
+        animationName: sprite.activeAnimation || sprite.defaultAnimation,
+        playing: sprite.playing !== false,
+      }),
+    };
+    spriteState.set(entity.id, state);
+  }
+  return state;
+};
+
+const updateSpriteRuntime = (dt) => {
+  const liveIds = new Set();
+  world.getEntities().forEach((entity) => {
+    const sprite = entity.components.get(ComponentType.SpriteCharacter);
+    if (!sprite || !Array.isArray(sprite.animations) || !sprite.animations.length) return;
+    const state = ensureSpriteState(entity, sprite);
+    liveIds.add(entity.id);
+
+    state.animator.setAnimation(sprite.activeAnimation || sprite.defaultAnimation, {
+      reset: false,
+      frameIndex: Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0,
+      playing: sprite.playing !== false,
+    });
+    const fallback =
+      sprite.animations.find((animation) => animation.name?.toLowerCase() === "idle") ??
+      sprite.animations[0];
+    const activeAnimation =
+      sprite.animations.find((animation) => animation.name === state.animator.activeAnimationName) ??
+      sprite.animations.find((animation) => animation.name === sprite.activeAnimation) ??
+      sprite.animations.find((animation) => animation.name === sprite.defaultAnimation) ??
+      fallback;
+    if (!activeAnimation) return;
+    state.animator.setFps(activeAnimation.fps);
+    const desiredFrameIndex = Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0;
+    if (state.animator.currentFrameIndex !== desiredFrameIndex) {
+      state.animator.scrubTo(desiredFrameIndex);
+    }
+    const result = state.animator.update(dt);
+    sprite.activeAnimation = activeAnimation.name;
+    sprite.activeFrameIndex = result.frameIndex;
+
+    const collider = entity.components.get(ComponentType.Collider);
+    if (collider) {
+      const frameCollider = resolveSpriteColliderForFrame(activeAnimation, result.frameIndex);
+      if (frameCollider && frameCollider.type === "box") {
+        collider.shape = "box";
+        collider.size = [
+          Number.isFinite(frameCollider.width) ? frameCollider.width : collider.size?.[0] ?? 1,
+          Number.isFinite(frameCollider.height) ? frameCollider.height : collider.size?.[1] ?? 1,
+          Number.isFinite(frameCollider.depth) ? frameCollider.depth : collider.size?.[2] ?? 0.2,
+        ];
+        collider.offset = [
+          Number.isFinite(frameCollider.x) ? frameCollider.x : collider.offset?.[0] ?? 0,
+          Number.isFinite(frameCollider.y) ? frameCollider.y : collider.offset?.[1] ?? 0,
+          collider.offset?.[2] ?? 0,
+        ];
+      }
+    }
+  });
+
+  Array.from(spriteState.keys()).forEach((entityId) => {
+    if (!liveIds.has(entityId) || !world.entities?.has?.(entityId)) {
+      spriteState.delete(entityId);
+    }
+  });
 };
 
 const findPlayerEntity = () => {
@@ -1041,6 +1145,9 @@ engine.addSystem((delta) => {
   updateMovement(delta);
   updateCameraOrbit(delta);
   runScripts(delta);
+});
+engine.addSystem((delta) => {
+  updateSpriteRuntime(delta);
 });
 engine.addSystem((delta) => {
   physics.update(delta, world, ComponentType);

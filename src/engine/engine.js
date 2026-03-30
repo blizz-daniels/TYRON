@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/GLTFLoader.js";
 import { ComponentType } from "./components.js";
+import {
+  SpriteAnimator,
+  getSpriteFrameSize,
+} from "./sprite-animation.js";
 
 const geometryFactory = {
   box: () => new THREE.BoxGeometry(1, 1, 1),
@@ -46,7 +50,9 @@ const disposeMaterial = (material) => {
 
   textureProps.forEach((prop) => {
     const texture = material[prop];
-    if (texture?.dispose) texture.dispose();
+    if (!texture?.dispose) return;
+    if (texture.userData?.sharedSpriteTexture) return;
+    texture.dispose();
   });
 
   if (material.dispose) {
@@ -68,19 +74,15 @@ const disposeObject3D = (object) => {
 };
 
 const stopSpriteRuntime = (object) => {
-  const spriteVideo = object?.userData?.spriteVideo;
-  if (!spriteVideo) return;
-  try {
-    spriteVideo.pause();
-  } catch (_) {}
-  if (spriteVideo.removeAttribute) {
-    spriteVideo.removeAttribute("src");
+  const spriteMesh = object?.userData?.spriteMesh;
+  if (spriteMesh?.material) {
+    spriteMesh.material.map = null;
+    spriteMesh.material.needsUpdate = true;
   }
-  if (spriteVideo.load) {
-    spriteVideo.load();
-  }
-  object.userData.spriteVideo = null;
+  object.userData.spriteAnimator = null;
   object.userData.spriteTexture = null;
+  object.userData.spriteTextureSource = "";
+  object.userData.spriteFrameIndex = 0;
 };
 
 const clearSceneCache = (scene, cache, gltfLoading) => {
@@ -102,7 +104,9 @@ export const syncWorldToScene = (
   cache,
   gltfLoader,
   gltfLoading,
-  options = {}
+  options = {},
+  camera = null,
+  delta = 0
 ) => {
   const entities = world.getEntities();
   const liveIds = new Set();
@@ -116,22 +120,23 @@ export const syncWorldToScene = (
     return [Math.max(width, 0.01), Math.max(height, 0.01)];
   };
 
-  const getSpriteAnimation = (sprite) => {
-    const animations = Array.isArray(sprite?.animations) ? sprite.animations : [];
-    if (!animations.length) return { animation: null, clip: null };
-
-    const fallback =
-      animations.find((item) => item.name?.toLowerCase() === "idle") ?? animations[0];
-    const targetName = sprite.activeAnimation || sprite.defaultAnimation || fallback.name;
-    const animation =
-      animations.find((item) => item.name === targetName) ??
-      animations.find((item) => item.name === sprite.defaultAnimation) ??
-      fallback;
-    if (!animation) return { animation: null, clip: null };
-
-    const clip = Array.isArray(animation.clips) ? animation.clips[0] ?? null : null;
-    return { animation, clip };
-  };
+  const spriteAnimationSignature = (sprite) =>
+    Array.isArray(sprite?.animations)
+      ? sprite.animations
+          .map((animation) =>
+            [
+              animation?.name ?? "",
+              animation?.fps ?? 0,
+              animation?.loop === false ? 0 : 1,
+              Array.isArray(animation?.frames)
+                ? animation.frames
+                    .map((frame) => frame?.source ?? frame?.relativePath ?? frame?.name ?? "")
+                    .join("|")
+                : "",
+            ].join(":")
+          )
+          .join("||")
+      : "";
 
   const ensureHolder = (entity) => {
     let holder = cache.get(entity.id);
@@ -198,8 +203,19 @@ export const syncWorldToScene = (
         new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, side: THREE.DoubleSide })
       );
       plane.userData.entityId = entity.id;
+      const pivotHelper = new THREE.AxesHelper(0.25);
+      pivotHelper.userData.entityId = entity.id;
       holder.userData.spriteMesh = plane;
-      holder.userData.spriteClipUrl = "";
+      holder.userData.spritePivot = pivotHelper;
+      holder.userData.spriteTextureSource = "";
+      holder.userData.spriteFrameIndex = 0;
+      holder.userData.spriteAnimator = null;
+      holder.userData.spriteSignature = "";
+      holder.userData.spriteMeshOutline = new THREE.BoxHelper(plane, 0x4ad4a8);
+      holder.userData.spriteMeshOutline.material.depthTest = false;
+      holder.userData.spriteMeshOutline.visible = false;
+      holder.add(holder.userData.spriteMeshOutline);
+      holder.add(pivotHelper);
       holder.add(plane);
       scene.add(holder);
       cache.set(entity.id, holder);
@@ -271,19 +287,44 @@ export const syncWorldToScene = (
     return holder;
   };
 
-  const syncSpriteMaterial = (holder, sprite) => {
+  const syncSpriteMaterial = (holder, sprite, deltaTime) => {
     const spriteMesh = holder.userData.spriteMesh;
     if (!spriteMesh) return;
-    const [width, height] = normalizeDisplaySize(sprite.displaySize);
-    if (
-      spriteMesh.geometry?.parameters?.width !== width ||
-      spriteMesh.geometry?.parameters?.height !== height
-    ) {
-      spriteMesh.geometry?.dispose?.();
-      spriteMesh.geometry = new THREE.PlaneGeometry(width, height);
+    const signature = spriteAnimationSignature(sprite);
+    if (holder.userData.spriteSignature !== signature) {
+      holder.userData.spriteAnimator = new SpriteAnimator({
+        animations: sprite.animations,
+        animationName: sprite.activeAnimation || sprite.defaultAnimation,
+        playing: sprite.playing !== false,
+      });
+      holder.userData.spriteSignature = signature;
     }
 
-    const { animation, clip } = getSpriteAnimation(sprite);
+    const animator = holder.userData.spriteAnimator;
+    const animations = Array.isArray(sprite?.animations) ? sprite.animations : [];
+    if (!animator || !animations.length) return;
+
+    const fallback =
+      animations.find((item) => item.name?.toLowerCase() === "idle") ?? animations[0];
+    const targetName = sprite.activeAnimation || sprite.defaultAnimation || fallback.name;
+    const animation =
+      animations.find((item) => item.name === targetName) ??
+      animations.find((item) => item.name === sprite.defaultAnimation) ??
+      fallback;
+    if (!animation) return;
+
+    animator.setAnimation(animation.name, {
+      reset: false,
+      frameIndex: Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0,
+      playing: sprite.playing !== false,
+    });
+    animator.setFps(animation.fps);
+    const desiredFrameIndex = Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0;
+    if (animator.currentFrameIndex !== desiredFrameIndex) {
+      animator.scrubTo(desiredFrameIndex);
+    }
+    animator.update(deltaTime);
+
     if (!animation) return;
     if (!sprite.activeAnimation || sprite.activeAnimation !== animation.name) {
       sprite.activeAnimation = animation.name;
@@ -292,55 +333,38 @@ export const syncWorldToScene = (
       sprite.defaultAnimation = animation.name;
     }
 
-    const nextUrl = clip?.url ?? "";
+    const resolvedTexture = animator.getCurrentFrameTexture() ?? null;
     const material = spriteMesh.material;
-    if (!nextUrl) {
-      stopSpriteRuntime(holder);
-      if (material?.map) {
-        material.map.dispose();
-        material.map = null;
-      }
-      holder.userData.spriteClipUrl = "";
-      if (material) {
-        material.needsUpdate = true;
-      }
-      return;
-    }
-    if (holder.userData.spriteClipUrl === nextUrl) {
-      const currentVideo = holder.userData.spriteVideo;
-      if (currentVideo && currentVideo.paused) {
-        currentVideo.play().catch(() => {});
-      }
-      return;
-    }
-
-    stopSpriteRuntime(holder);
-    if (material?.map) {
-      material.map.dispose();
+    if (resolvedTexture && material.map !== resolvedTexture) {
+      material.map = resolvedTexture;
+      material.needsUpdate = true;
+    } else if (!resolvedTexture && material.map) {
       material.map = null;
-    }
-
-    const video = document.createElement("video");
-    video.src = nextUrl;
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.autoplay = true;
-
-    const texture = new THREE.VideoTexture(video);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-
-    if (material) {
-      material.map = texture;
       material.needsUpdate = true;
     }
-    holder.userData.spriteVideo = video;
-    holder.userData.spriteTexture = texture;
-    holder.userData.spriteClipUrl = nextUrl;
-    video.play().catch(() => {});
+
+    const frameTexture = resolvedTexture;
+    const frameIndex = animator.currentFrameIndex;
+    sprite.activeFrameIndex = frameIndex;
+    const [width, height] = frameTexture
+      ? getSpriteFrameSize(frameTexture, normalizeDisplaySize(sprite.displaySize))
+      : normalizeDisplaySize(sprite.displaySize);
+    if (
+      spriteMesh.geometry?.parameters?.width !== width ||
+      spriteMesh.geometry?.parameters?.height !== height
+    ) {
+      spriteMesh.geometry?.dispose?.();
+      spriteMesh.geometry = new THREE.PlaneGeometry(width, height);
+    }
+    spriteMesh.material.transparent = true;
+    spriteMesh.material.side = THREE.DoubleSide;
+    holder.userData.spriteTexture = frameTexture;
+    holder.userData.spriteTextureSource = frameTexture?.userData?.source ?? "";
+    holder.userData.spriteFrameIndex = frameIndex;
+    if (holder.userData.spriteMeshOutline) {
+      holder.userData.spriteMeshOutline.visible = Boolean(options.showSpriteOutlines);
+      holder.userData.spriteMeshOutline.update();
+    }
   };
 
   entities.forEach((entity) => {
@@ -349,19 +373,22 @@ export const syncWorldToScene = (
     const mesh = entity.components.get(ComponentType.Mesh);
     const gltf = entity.components.get(ComponentType.Gltf);
     const sprite = entity.components.get(ComponentType.SpriteCharacter);
-    const camera = entity.components.get(ComponentType.Camera);
+    const cameraComponent = entity.components.get(ComponentType.Camera);
 
     if (!transform) return;
 
     if (sprite) {
       const holder = ensureSprite(entity, sprite);
-      syncSpriteMaterial(holder, sprite);
+      syncSpriteMaterial(holder, sprite, delta);
       if (skipTransformIds.has(entity.id)) return;
       applyTransform(holder, transform);
+      if (camera) {
+        holder.lookAt(camera.position);
+      }
       return;
     }
 
-    if (camera) {
+    if (cameraComponent) {
       if (!showCameraRig) {
         const cached = cache.get(entity.id);
         if (cached?.userData?.renderKind === "camera") {
@@ -374,7 +401,7 @@ export const syncWorldToScene = (
         return;
       }
 
-      const holder = ensureCameraRig(entity, camera);
+      const holder = ensureCameraRig(entity, cameraComponent);
       if (skipTransformIds.has(entity.id)) return;
       applyTransform(holder, transform);
       return;
@@ -531,7 +558,9 @@ export class Engine {
         this.cache,
         this.gltfLoader,
         this.gltfLoading,
-        this.sceneSyncOptions
+        this.sceneSyncOptions,
+        this.camera,
+        delta
       );
     }
     this.renderer.render(this.scene, this.camera);

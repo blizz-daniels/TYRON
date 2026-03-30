@@ -16,6 +16,12 @@ import {
   createSpriteCharacter,
   ComponentType,
 } from "./src/engine/components.js";
+import {
+  loadSpriteCharactersFromEntries,
+  cloneSpriteCollider,
+  createDefaultSpriteCollider,
+  resolveSpriteColliderForFrame,
+} from "./src/engine/sprite-animation.js";
 import { serializeScene, deserializeScene } from "./src/engine/scene-io.js";
 
 const canvas = document.getElementById("viewport");
@@ -30,7 +36,6 @@ const importSpriteFolderButton = document.getElementById("importSpriteFolderBtn"
 const importSpriteFolderInput = document.getElementById("importSpriteFolder");
 const playButton = document.getElementById("playBtn");
 const stopButton = document.getElementById("stopBtn");
-const createSpriteButton = document.getElementById("createSpriteBtn");
 const undoSceneButton = document.getElementById("undoScene");
 const redoSceneButton = document.getElementById("redoScene");
 const uploadedList = document.getElementById("uploadedList");
@@ -166,6 +171,7 @@ const engine = new Engine({
   canvas,
   sceneSyncOptions: {
     showCameraRig: true,
+    showSpriteOutlines: true,
   },
 });
 let world = new World();
@@ -225,10 +231,12 @@ const setupViewportResizeSync = () => {
   );
 };
 
+const editorClock = new THREE.Clock();
 const meshCache = engine.cache;
 const colliderHelpers = new Map();
 const hitBoxHelpers = new Map();
 const hurtBoxHelpers = new Map();
+const spriteColliderHelpers = new Map();
 let selectedEntityId = null;
 let isTransformingSelectedEntity = false;
 let selectedSpriteCharacterName = null;
@@ -724,34 +732,133 @@ const createCameraEntity = () => {
   }
 };
 
-const createDefaultSpriteBox = () => ({
-  size: [1, 1, 0.2],
-  offset: [0, 0, 0],
-});
-
 const normalizeKeyBinding = (key) =>
   typeof key === "string" ? key.trim().toLowerCase() : "";
 
-const cloneSpriteBox = (box) => ({
-  size: Array.isArray(box?.size) ? [...box.size] : [1, 1, 0.2],
-  offset: Array.isArray(box?.offset) ? [...box.offset] : [0, 0, 0],
+const cloneSpriteColliderBox = (collider) =>
+  cloneSpriteCollider(collider ?? createDefaultSpriteCollider());
+
+const cloneSpriteFrame = (frame, index = 0) => ({
+  index: Number.isFinite(frame?.index) ? frame.index : index,
+  name: frame?.name ?? `frame_${String(index + 1).padStart(3, "0")}`,
+  source: frame?.source ?? frame?.relativePath ?? "",
+  relativePath: frame?.relativePath ?? frame?.source ?? "",
+  width: Number.isFinite(frame?.width) ? frame.width : null,
+  height: Number.isFinite(frame?.height) ? frame.height : null,
+  collider: frame?.collider ? cloneSpriteColliderBox(frame.collider) : null,
+  events: Array.isArray(frame?.events)
+    ? frame.events.map((event) => ({
+        frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : 0,
+        type: event?.type ?? "frame",
+        data:
+          event && typeof event.data === "object" && !Array.isArray(event.data)
+            ? { ...event.data }
+            : {},
+      }))
+    : [],
 });
 
 const cloneSpriteAnimation = (animation) => ({
   name: animation?.name ?? "idle",
-  clips: Array.isArray(animation?.clips)
-    ? animation.clips.map((clip) => ({
-        name: clip.name ?? "clip",
-        url: clip.url ?? "",
-        size: Number.isFinite(clip.size) ? clip.size : 0,
-        relativePath: clip.relativePath ?? "",
+  fps: Number.isFinite(animation?.fps) ? animation.fps : 12,
+  loop: animation?.loop !== false,
+  frames: Array.isArray(animation?.frames)
+    ? animation.frames.map((frame, index) => cloneSpriteFrame(frame, index))
+    : [],
+  colliders: Array.isArray(animation?.colliders)
+    ? animation.colliders.map((entry) => ({
+        frame: Number.isFinite(entry?.frame) ? Math.max(0, Math.floor(entry.frame)) : 0,
+        collider: cloneSpriteColliderBox(entry?.collider),
       }))
     : [],
-  collision: cloneSpriteBox(animation?.collision),
-  hitBox: cloneSpriteBox(animation?.hitBox),
-  hurtBox: cloneSpriteBox(animation?.hurtBox),
+  events: Array.isArray(animation?.events)
+    ? animation.events.map((event) => ({
+        frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : 0,
+        type: event?.type ?? "frame",
+        data:
+          event && typeof event.data === "object" && !Array.isArray(event.data)
+            ? { ...event.data }
+            : {},
+      }))
+    : [],
+  blendMode: animation?.blendMode ?? "replace",
+  stateMachine:
+    animation?.stateMachine && typeof animation.stateMachine === "object"
+      ? { ...animation.stateMachine }
+      : null,
+  spriteSheet:
+    animation?.spriteSheet && typeof animation.spriteSheet === "object"
+      ? { ...animation.spriteSheet }
+      : null,
   dedicatedKey: normalizeKeyBinding(animation?.dedicatedKey),
 });
+
+const buildSpriteAnimationJson = (animation) => {
+  const colliders = Array.isArray(animation?.colliders)
+    ? animation.colliders.map((entry) => ({
+        frame: Number.isFinite(entry?.frame) ? Math.max(0, Math.floor(entry.frame)) : 0,
+        collider: cloneSpriteColliderBox(entry?.collider),
+      }))
+    : [];
+  const events = Array.isArray(animation?.events)
+    ? animation.events.map((event) => ({
+        frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : 0,
+        type: event?.type ?? "frame",
+        data:
+          event && typeof event.data === "object" && !Array.isArray(event.data)
+            ? { ...event.data }
+            : {},
+      }))
+    : [];
+  const frameEvents = Array.isArray(animation?.frames)
+    ? animation.frames.flatMap((frame, index) =>
+        Array.isArray(frame?.events)
+          ? frame.events.map((event) => ({
+              frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : index,
+              type: event?.type ?? "frame",
+              data:
+                event && typeof event.data === "object" && !Array.isArray(event.data)
+                  ? { ...event.data }
+                  : {},
+            }))
+          : []
+      )
+    : [];
+
+  return {
+    name: animation?.name ?? "idle",
+    fps: Number.isFinite(animation?.fps) ? animation.fps : 12,
+    loop: animation?.loop !== false,
+    blendMode: animation?.blendMode ?? "replace",
+    dedicatedKey: normalizeKeyBinding(animation?.dedicatedKey),
+    stateMachine:
+      animation?.stateMachine && typeof animation.stateMachine === "object"
+        ? { ...animation.stateMachine }
+        : null,
+    spriteSheet:
+      animation?.spriteSheet && typeof animation.spriteSheet === "object"
+        ? { ...animation.spriteSheet }
+        : null,
+    colliders,
+    events,
+    frameEvents,
+  };
+};
+
+const downloadJsonFile = (filename, payload) => {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
 
 const pickIdleAnimationName = (animations) => {
   if (!Array.isArray(animations) || !animations.length) return "";
@@ -793,8 +900,10 @@ const ensureSpriteSelection = () => {
 
 const revokeSpriteCharacterUrls = (character) => {
   character.animations.forEach((animation) => {
-    animation.clips.forEach((clip) => {
-      URL.revokeObjectURL(clip.url);
+    animation.frames.forEach((frame) => {
+      if (typeof frame.source === "string" && frame.source.startsWith("blob:")) {
+        URL.revokeObjectURL(frame.source);
+      }
     });
   });
 };
@@ -815,95 +924,72 @@ const upsertSpriteCharacter = (nextCharacter) => {
       (item) => item.name === animation.name
     );
     if (!existingAnimation) return;
-    animation.collision = cloneSpriteBox(existingAnimation.collision);
-    animation.hitBox = cloneSpriteBox(existingAnimation.hitBox);
-    animation.hurtBox = cloneSpriteBox(existingAnimation.hurtBox);
+    animation.fps = existingAnimation.fps ?? animation.fps;
+    animation.loop = existingAnimation.loop ?? animation.loop;
     animation.dedicatedKey = normalizeKeyBinding(existingAnimation.dedicatedKey);
+    if (Array.isArray(existingAnimation.frames) && existingAnimation.frames.length) {
+      animation.frames = animation.frames.map((frame, index) => {
+        const existingFrame =
+          existingAnimation.frames[index] ??
+          existingAnimation.frames.find((item) => item.name === frame.name);
+        return cloneSpriteFrame(
+          {
+            ...frame,
+            collider: existingFrame?.collider ?? frame.collider,
+            events: existingFrame?.events ?? frame.events,
+          },
+          index
+        );
+      });
+      if (Array.isArray(existingAnimation.colliders) && existingAnimation.colliders.length) {
+        animation.colliders = existingAnimation.colliders.map((entry) => ({
+          frame: entry.frame,
+          collider: cloneSpriteColliderBox(entry.collider),
+        }));
+      }
+    }
   });
 
   revokeSpriteCharacterUrls(existingCharacter);
   spriteCharacters.splice(existingIndex, 1, nextCharacter);
   spriteCharacters.sort((a, b) => sortByNaturalName(a.name, b.name));
 };
-
-const parseSpriteFolderPath = (rawPath) => {
-  const normalizedPath = (rawPath || "").replace(/\\/g, "/");
-  const segments = normalizedPath.split("/").filter(Boolean);
-  if (segments.length < 3) return null;
-
-  return {
-    characterName: segments[segments.length - 3],
-    animationName: segments[segments.length - 2],
-    clipName: segments[segments.length - 1],
-    relativePath: normalizedPath,
-  };
-};
-
-const importSpriteEntries = (entries) => {
+const importSpriteEntries = async (entries) => {
   if (!Array.isArray(entries) || !entries.length) return;
 
-  const characters = new Map();
-  let importedClipCount = 0;
-  const clipPattern = /\.(mp4|webm)$/i;
-  entries.forEach((entry) => {
-    const file = entry?.file;
-    if (!file || !clipPattern.test(file.name)) return;
-
-    const parsed = parseSpriteFolderPath(entry.path || file.webkitRelativePath || file.name);
-    if (!parsed) return;
-
-    importedClipCount += 1;
-    if (!characters.has(parsed.characterName)) {
-      characters.set(parsed.characterName, {
-        name: parsed.characterName,
-        animations: new Map(),
-      });
-    }
-    const character = characters.get(parsed.characterName);
-    if (!character.animations.has(parsed.animationName)) {
-      character.animations.set(parsed.animationName, {
-        name: parsed.animationName,
-        clips: [],
-        collision: createDefaultSpriteBox(),
-        hitBox: createDefaultSpriteBox(),
-        hurtBox: createDefaultSpriteBox(),
-        dedicatedKey: "",
-      });
+  try {
+    const loadedCharacters = await loadSpriteCharactersFromEntries(entries);
+    if (!loadedCharacters.length) {
+      status.textContent =
+        "No sprite PNG frames found. Use /assets/<character>/<animation>/frame_001.png and animation JSON files.";
+      return;
     }
 
-    const animation = character.animations.get(parsed.animationName);
-    animation.clips.push({
-      name: parsed.clipName,
-      url: URL.createObjectURL(file),
-      size: file.size,
-      relativePath: parsed.relativePath,
+    loadedCharacters.forEach((character) => {
+      upsertSpriteCharacter(character);
     });
-  });
 
-  if (!importedClipCount) {
-    status.textContent =
-      "No sprite clips found. Use /sprites/<character>/<animation>/<clip>.mp4 (or .webm).";
-    return;
+    const animationCount = loadedCharacters.reduce(
+      (count, character) => count + character.animations.length,
+      0
+    );
+    const frameCount = loadedCharacters.reduce(
+      (count, character) =>
+        count +
+        character.animations.reduce(
+          (animationCount, animation) => animationCount + animation.frames.length,
+          0
+        ),
+      0
+    );
+    ensureSpriteSelection();
+    renderSpriteBrowser();
+    rebuildInspector();
+    status.textContent = `Imported ${loadedCharacters.length} character folder(s), ${animationCount} animation(s), and ${frameCount} frame(s).`;
+  } catch (error) {
+    console.warn("Sprite import failed:", error);
+    status.textContent = "Sprite import failed. Check the folder structure and try again.";
   }
-
-  characters.forEach((character) => {
-    const animations = Array.from(character.animations.values())
-      .map((animation) => {
-        animation.clips.sort((a, b) => sortByNaturalName(a.name, b.name));
-        return animation;
-      })
-      .sort((a, b) => sortByNaturalName(a.name, b.name));
-
-    upsertSpriteCharacter({
-      name: character.name,
-      animations,
-    });
-  });
-
-  ensureSpriteSelection();
-  renderSpriteBrowser();
-  rebuildInspector();
-  status.textContent = `Imported ${importedClipCount} sprite clip(s) across ${characters.size} character folder(s).`;
 };
 
 const addSpriteCharacterToScene = (character) => {
@@ -922,6 +1008,9 @@ const addSpriteCharacterToScene = (character) => {
       animations,
       defaultAnimation: idleAnimation,
       activeAnimation: idleAnimation,
+      activeFrameIndex: 0,
+      playing: true,
+      colliderEditMode: false,
     })
   );
   selectedSpriteCharacterName = character.name;
@@ -945,13 +1034,296 @@ const appendSpriteInspectorSection = () => {
 
   const section = document.createElement("div");
   section.className = "sprite-inspector";
-  section.innerHTML = "<label>Sprite Animation Boxes</label>";
+  section.innerHTML = "<label>Sprite</label>";
+
+  const entity = world.getEntities().find((item) => item.id === selectedEntityId) ?? null;
+  const spriteCharacter = entity?.components.get(ComponentType.SpriteCharacter) ?? null;
+
+  if (spriteCharacter) {
+    if (!Array.isArray(spriteCharacter.animations)) {
+      spriteCharacter.animations = [];
+    }
+    if (!spriteCharacter.defaultAnimation) {
+      spriteCharacter.defaultAnimation = pickIdleAnimationName(spriteCharacter.animations);
+    }
+    if (!spriteCharacter.activeAnimation) {
+      spriteCharacter.activeAnimation = spriteCharacter.defaultAnimation;
+    }
+    if (!Number.isFinite(spriteCharacter.activeFrameIndex)) {
+      spriteCharacter.activeFrameIndex = 0;
+    }
+
+    const activeAnimation =
+      spriteCharacter.animations.find((animation) => animation.name === spriteCharacter.activeAnimation) ??
+      spriteCharacter.animations[0] ??
+      null;
+    const activeFrameCount = Math.max(activeAnimation?.frames?.length ?? 0, 0);
+
+    const summary = document.createElement("p");
+    summary.className = "sprite-inspector__title";
+    summary.textContent = `${spriteCharacter.characterName || entity.name}`;
+    section.appendChild(summary);
+
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = `${spriteCharacter.animations.length} animation(s) - ${activeFrameCount} frame(s)`;
+    section.appendChild(meta);
+
+    const preview = document.createElement("div");
+    preview.className = "sprite-preview";
+    const previewFrame = activeAnimation?.frames?.[spriteCharacter.activeFrameIndex] ?? activeAnimation?.frames?.[0] ?? null;
+    const previewImage = document.createElement("img");
+    previewImage.alt = previewFrame ? `${previewFrame.name} preview` : "Sprite preview";
+    previewImage.src = previewFrame?.source ?? "";
+    const previewLabel = document.createElement("span");
+    previewLabel.textContent = `${activeAnimation?.name ?? "No animation"} / frame ${Math.min(
+      spriteCharacter.activeFrameIndex + 1,
+      Math.max(activeFrameCount, 1)
+    )}`;
+    preview.append(previewImage, previewLabel);
+    section.appendChild(preview);
+
+    if (activeAnimation) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "btn btn--ghost btn--small";
+      exportButton.textContent = "Download Animation JSON";
+      exportButton.addEventListener("click", () => {
+        const payload = buildSpriteAnimationJson(activeAnimation);
+        const fileName = `${activeAnimation.name || "animation"}.json`;
+        downloadJsonFile(fileName, payload);
+        if (status) {
+          status.textContent = `Downloaded ${fileName}.`;
+        }
+      });
+      section.appendChild(exportButton);
+    }
+
+    const controlRow = document.createElement("div");
+    controlRow.className = "row";
+    const playButton = document.createElement("button");
+    playButton.type = "button";
+    playButton.className = "btn btn--ghost btn--small";
+    playButton.textContent = spriteCharacter.playing === false ? "Play" : "Pause";
+    playButton.addEventListener("click", () => {
+      pushSceneHistory();
+      spriteCharacter.playing = !spriteCharacter.playing;
+      playButton.textContent = spriteCharacter.playing === false ? "Play" : "Pause";
+      rebuildInspector();
+    });
+    const scrubButton = document.createElement("button");
+    scrubButton.type = "button";
+    scrubButton.className = "btn btn--ghost btn--small";
+    scrubButton.textContent = "Reset Frame";
+    scrubButton.addEventListener("click", () => {
+      pushSceneHistory();
+      spriteCharacter.activeFrameIndex = 0;
+      spriteCharacter.playing = false;
+      rebuildInspector();
+    });
+    controlRow.append(playButton, scrubButton);
+    section.appendChild(controlRow);
+
+    const animationRow = document.createElement("div");
+    animationRow.className = "row";
+    const animationLabel = document.createElement("label");
+    animationLabel.textContent = "Animation";
+    const animationSelect = document.createElement("select");
+    spriteCharacter.animations.forEach((animation) => {
+      const option = document.createElement("option");
+      option.value = animation.name;
+      option.textContent = `${animation.name} (${animation.frames.length})`;
+      if (animation.name === spriteCharacter.activeAnimation) {
+        option.selected = true;
+      }
+      animationSelect.appendChild(option);
+    });
+    animationSelect.addEventListener("change", () => {
+      pushSceneHistory();
+      spriteCharacter.activeAnimation = animationSelect.value;
+      spriteCharacter.activeFrameIndex = 0;
+      spriteCharacter.playing = true;
+      rebuildInspector();
+    });
+    animationRow.append(animationLabel, animationSelect);
+    section.appendChild(animationRow);
+
+    if (activeAnimation) {
+      const fpsRow = document.createElement("div");
+      fpsRow.className = "row";
+      const fpsLabel = document.createElement("label");
+      fpsLabel.textContent = "FPS";
+      const fpsInput = document.createElement("input");
+      fpsInput.type = "number";
+      fpsInput.min = "1";
+      fpsInput.max = "60";
+      fpsInput.step = "1";
+      fpsInput.value = Number.isFinite(activeAnimation.fps) ? String(activeAnimation.fps) : "12";
+      fpsInput.addEventListener("change", () => {
+        pushSceneHistory();
+        const value = Number.parseInt(fpsInput.value, 10);
+        activeAnimation.fps = Number.isFinite(value) && value > 0 ? value : 12;
+        fpsInput.value = String(activeAnimation.fps);
+      });
+      fpsRow.append(fpsLabel, fpsInput);
+      section.appendChild(fpsRow);
+
+      const loopRow = document.createElement("div");
+      loopRow.className = "row";
+      const loopLabel = document.createElement("label");
+      loopLabel.textContent = "Loop";
+      const loopInput = document.createElement("input");
+      loopInput.type = "checkbox";
+      loopInput.checked = activeAnimation.loop !== false;
+      loopInput.addEventListener("change", () => {
+        pushSceneHistory();
+        activeAnimation.loop = loopInput.checked;
+      });
+      loopRow.append(loopLabel, loopInput);
+      section.appendChild(loopRow);
+
+      const frameInfo = document.createElement("p");
+      frameInfo.className = "muted";
+      frameInfo.textContent = `Frame ${Math.min(spriteCharacter.activeFrameIndex + 1, Math.max(activeFrameCount, 1))} / ${Math.max(activeFrameCount, 1)}`;
+      section.appendChild(frameInfo);
+
+      const scrubRow = document.createElement("div");
+      scrubRow.className = "row";
+      const scrubLabel = document.createElement("label");
+      scrubLabel.textContent = "Scrub";
+      const scrubInput = document.createElement("input");
+      scrubInput.type = "range";
+      scrubInput.min = "0";
+      scrubInput.max = String(Math.max(activeFrameCount - 1, 0));
+      scrubInput.step = "1";
+      scrubInput.value = String(Math.min(spriteCharacter.activeFrameIndex, Math.max(activeFrameCount - 1, 0)));
+      scrubInput.addEventListener("input", () => {
+        pushSceneHistory();
+        const value = Number.parseInt(scrubInput.value, 10);
+        spriteCharacter.activeFrameIndex = Number.isFinite(value) ? value : 0;
+        spriteCharacter.playing = false;
+        rebuildInspector();
+      });
+      scrubRow.append(scrubLabel, scrubInput);
+      section.appendChild(scrubRow);
+
+      const colliderToggleRow = document.createElement("div");
+      colliderToggleRow.className = "row";
+      const colliderToggleLabel = document.createElement("label");
+      colliderToggleLabel.textContent = "Collider Edit";
+      const colliderToggle = document.createElement("input");
+      colliderToggle.type = "checkbox";
+      colliderToggle.checked = Boolean(spriteCharacter.colliderEditMode);
+      colliderToggle.addEventListener("change", () => {
+        pushSceneHistory();
+        spriteCharacter.colliderEditMode = colliderToggle.checked;
+        rebuildInspector();
+      });
+      colliderToggleRow.append(colliderToggleLabel, colliderToggle);
+      section.appendChild(colliderToggleRow);
+
+      if (spriteCharacter.colliderEditMode) {
+        const currentFrame = activeAnimation.frames[Math.min(spriteCharacter.activeFrameIndex, activeAnimation.frames.length - 1)] ?? null;
+        const collider = currentFrame?.collider ?? createDefaultSpriteCollider();
+        const ensureFrameCollider = () => {
+          if (!currentFrame) return null;
+          if (!Array.isArray(activeAnimation.colliders)) {
+            activeAnimation.colliders = [];
+          }
+          currentFrame.collider = cloneSpriteColliderBox(collider);
+          const existingIndex = activeAnimation.colliders.findIndex((entry) => entry.frame === currentFrame.index);
+          const nextEntry = {
+            frame: currentFrame.index,
+            collider: cloneSpriteColliderBox(collider),
+          };
+          if (existingIndex >= 0) {
+            activeAnimation.colliders.splice(existingIndex, 1, nextEntry);
+          } else {
+            activeAnimation.colliders.push(nextEntry);
+          }
+          return currentFrame.collider;
+        };
+
+        const colliderLabel = document.createElement("p");
+        colliderLabel.className = "muted";
+        colliderLabel.textContent = `Frame ${currentFrame?.index ?? 0} collider`;
+        section.appendChild(colliderLabel);
+
+        const colliderFields = [
+          ["x", "X"],
+          ["y", "Y"],
+          ["width", "Width"],
+          ["height", "Height"],
+        ];
+        colliderFields.forEach(([key, labelText]) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const label = document.createElement("label");
+          label.textContent = labelText;
+          const input = document.createElement("input");
+          input.type = "number";
+          input.step = "0.1";
+          input.value = String(Number.isFinite(collider[key]) ? collider[key] : 0);
+          input.addEventListener("input", () => {
+            pushSceneHistory();
+            const value = Number.parseFloat(input.value);
+            collider[key] = Number.isFinite(value) ? value : 0;
+            ensureFrameCollider();
+          });
+          row.append(label, input);
+          section.appendChild(row);
+        });
+
+        const depthRow = document.createElement("div");
+        depthRow.className = "row";
+        const depthLabel = document.createElement("label");
+        depthLabel.textContent = "Depth";
+        const depthInput = document.createElement("input");
+        depthInput.type = "number";
+        depthInput.step = "0.1";
+        depthInput.value = String(Number.isFinite(collider.depth) ? collider.depth : 0.1);
+        depthInput.addEventListener("input", () => {
+          pushSceneHistory();
+          const value = Number.parseFloat(depthInput.value);
+          collider.depth = Number.isFinite(value) ? value : 0.1;
+          ensureFrameCollider();
+        });
+        depthRow.append(depthLabel, depthInput);
+        section.appendChild(depthRow);
+      }
+    }
+
+    const keyLegend = document.createElement("p");
+    keyLegend.className = "muted";
+    keyLegend.textContent = "Runtime key triggers:";
+    section.appendChild(keyLegend);
+
+    spriteCharacter.animations.forEach((animation) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("label");
+      label.textContent = animation.name;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "key";
+      input.value = normalizeKeyBinding(animation.dedicatedKey);
+      input.addEventListener("input", () => {
+        pushSceneHistory();
+        animation.dedicatedKey = normalizeKeyBinding(input.value);
+        input.value = animation.dedicatedKey;
+      });
+      row.append(label, input);
+      section.appendChild(row);
+    });
+    inspectorFields.appendChild(section);
+    return;
+  }
 
   const { character, animation } = getSelectedSpriteAnimationData();
   if (!character || !animation) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "Select a sprite character and animation to edit boxes.";
+    empty.textContent = "Select a sprite character in the browser to inspect its animations.";
     section.appendChild(empty);
     inspectorFields.appendChild(section);
     return;
@@ -970,27 +1342,22 @@ const appendSpriteInspectorSection = () => {
   });
   section.appendChild(addToSceneButton);
 
+  const frameCount = Array.isArray(animation.frames) ? animation.frames.length : 0;
+  const firstFrame = animation.frames[0] ?? null;
+  const preview = document.createElement("div");
+  preview.className = "sprite-preview";
+  const previewImage = document.createElement("img");
+  previewImage.src = firstFrame?.source ?? "";
+  previewImage.alt = firstFrame ? firstFrame.name : "Sprite preview";
+  const previewLabel = document.createElement("span");
+  previewLabel.textContent = `${frameCount} frame(s)`;
+  preview.append(previewImage, previewLabel);
+  section.appendChild(preview);
+
   const clipCount = document.createElement("p");
   clipCount.className = "muted";
-  clipCount.textContent = `${animation.clips.length} clip(s)`;
+  clipCount.textContent = `${frameCount} frame(s), fps ${animation.fps}, loop ${animation.loop ? "on" : "off"}`;
   section.appendChild(clipCount);
-
-  const firstClip = animation.clips[0];
-  if (firstClip) {
-    const preview = document.createElement("div");
-    preview.className = "sprite-preview";
-    const video = document.createElement("video");
-    video.className = "sprite-preview__video";
-    video.src = firstClip.url;
-    video.muted = true;
-    video.loop = true;
-    video.autoplay = true;
-    video.playsInline = true;
-    const clipName = document.createElement("span");
-    clipName.textContent = firstClip.name;
-    preview.append(video, clipName);
-    section.appendChild(preview);
-  }
 
   const keyBindingField = document.createElement("div");
   keyBindingField.className = "row";
@@ -1007,29 +1374,51 @@ const appendSpriteInspectorSection = () => {
   keyBindingField.append(keyBindingLabel, keyBindingInput);
   section.appendChild(keyBindingField);
 
-  const ensureBoxShape = (box) => {
-    if (!Array.isArray(box.size) || box.size.length !== 3) box.size = [1, 1, 0.2];
-    if (!Array.isArray(box.offset) || box.offset.length !== 3) box.offset = [0, 0, 0];
+  const ensureFrameCollider = (frame) => {
+    if (!frame) return null;
+    if (!Array.isArray(animation.colliders)) {
+      animation.colliders = [];
+    }
+    frame.collider = cloneSpriteColliderBox(frame.collider);
+    const existingIndex = animation.colliders.findIndex((entry) => entry.frame === frame.index);
+    const nextEntry = {
+      frame: frame.index,
+      collider: cloneSpriteColliderBox(frame.collider),
+    };
+    if (existingIndex >= 0) {
+      animation.colliders.splice(existingIndex, 1, nextEntry);
+    } else {
+      animation.colliders.push(nextEntry);
+    }
+    return frame.collider;
   };
 
-  const appendBoxEditor = (title, box) => {
-    ensureBoxShape(box);
-    const titleElement = document.createElement("label");
-    titleElement.textContent = title;
-    section.appendChild(titleElement);
+  const currentFrame = animation.frames[0] ?? null;
+  if (currentFrame) {
+    const frameLabel = document.createElement("p");
+    frameLabel.className = "muted";
+    frameLabel.textContent = "Frame 1 collider";
+    section.appendChild(frameLabel);
 
-    const size = buildVectorField("Size (x/y/z)", box.size, (index, value) => {
-      box.size[index] = value;
+    const collider = ensureFrameCollider(currentFrame);
+    ["x", "y", "width", "height", "depth"].forEach((field) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const label = document.createElement("label");
+      label.textContent = field.toUpperCase();
+      const input = document.createElement("input");
+      input.type = "number";
+      input.step = "0.1";
+      input.value = String(Number.isFinite(collider[field]) ? collider[field] : 0);
+      input.addEventListener("input", () => {
+        pushSceneHistory();
+        collider[field] = Number.parseFloat(input.value) || 0;
+        ensureFrameCollider(currentFrame);
+      });
+      row.append(label, input);
+      section.appendChild(row);
     });
-    const offset = buildVectorField("Offset (x/y/z)", box.offset, (index, value) => {
-      box.offset[index] = value;
-    });
-    section.append(size.wrapper, offset.wrapper);
-  };
-
-  appendBoxEditor("Collision Box", animation.collision);
-  appendBoxEditor("Hit Box", animation.hitBox);
-  appendBoxEditor("Hurt Box", animation.hurtBox);
+  }
   inspectorFields.appendChild(section);
 };
 
@@ -1082,7 +1471,11 @@ const renderSpriteBrowser = () => {
 
     const meta = document.createElement("p");
     meta.className = "sprite-character__meta";
-    meta.textContent = `${character.animations.length} animation(s)`;
+    const frameTotal = character.animations.reduce(
+      (count, animation) => count + (animation.frames?.length ?? 0),
+      0
+    );
+    meta.textContent = `${character.animations.length} animation(s), ${frameTotal} frame(s)`;
     card.appendChild(meta);
 
     if (isCharacterSelected) {
@@ -1095,7 +1488,7 @@ const renderSpriteBrowser = () => {
         if (animation.name === selectedSpriteAnimationName) {
           animationButton.classList.add("active");
         }
-        animationButton.textContent = `${animation.name} (${animation.clips.length})`;
+        animationButton.textContent = `${animation.name} (${animation.frames.length})`;
         animationButton.addEventListener("click", (event) => {
           event.stopPropagation();
           selectedSpriteCharacterName = character.name;
@@ -1107,6 +1500,37 @@ const renderSpriteBrowser = () => {
         animationList.appendChild(animationButton);
       });
       card.appendChild(animationList);
+
+      const selectedAnimation =
+        character.animations.find((animation) => animation.name === selectedSpriteAnimationName) ??
+        character.animations[0] ??
+        null;
+      if (selectedAnimation) {
+        const preview = document.createElement("div");
+        preview.className = "sprite-preview";
+        const previewImage = document.createElement("img");
+        previewImage.alt = `${selectedAnimation.name} preview`;
+        previewImage.src = selectedAnimation.frames[0]?.source ?? "";
+        const previewLabel = document.createElement("span");
+        previewLabel.textContent = `${selectedAnimation.name} - ${selectedAnimation.frames.length} frame(s)`;
+        preview.append(previewImage, previewLabel);
+        card.appendChild(preview);
+
+        const exportButton = document.createElement("button");
+        exportButton.type = "button";
+        exportButton.className = "btn btn--ghost btn--small";
+        exportButton.textContent = "Download JSON";
+        exportButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const payload = buildSpriteAnimationJson(selectedAnimation);
+          const fileName = `${selectedAnimation.name || "animation"}.json`;
+          downloadJsonFile(fileName, payload);
+          if (status) {
+            status.textContent = `Downloaded ${fileName}.`;
+          }
+        });
+        card.appendChild(exportButton);
+      }
     }
 
     spriteBrowser.appendChild(card);
@@ -1541,93 +1965,6 @@ const rebuildInspector = () => {
     inspectorFields.appendChild(section);
   }
 
-  const spriteCharacter = entity.components.get(ComponentType.SpriteCharacter);
-  if (spriteCharacter) {
-    const section = document.createElement("div");
-    section.innerHTML = "<label>Sprite Character</label>";
-
-    if (!Array.isArray(spriteCharacter.animations)) {
-      spriteCharacter.animations = [];
-    }
-    if (!spriteCharacter.defaultAnimation) {
-      spriteCharacter.defaultAnimation = pickIdleAnimationName(spriteCharacter.animations);
-    }
-    if (!spriteCharacter.activeAnimation) {
-      spriteCharacter.activeAnimation = spriteCharacter.defaultAnimation;
-    }
-
-    const nameInfo = document.createElement("p");
-    nameInfo.className = "muted";
-    nameInfo.textContent = `Character: ${spriteCharacter.characterName || entity.name}`;
-    section.appendChild(nameInfo);
-
-    const buildAnimationSelect = (title, selectedValue, onChange) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      const label = document.createElement("label");
-      label.textContent = title;
-      const select = document.createElement("select");
-      spriteCharacter.animations.forEach((animation) => {
-        const option = document.createElement("option");
-        option.value = animation.name;
-        option.textContent = animation.name;
-        if (animation.name === selectedValue) {
-          option.selected = true;
-        }
-        select.appendChild(option);
-      });
-      select.addEventListener("change", () => {
-        pushSceneHistory();
-        onChange(select.value);
-      });
-      row.append(label, select);
-      return row;
-    };
-
-    if (spriteCharacter.animations.length) {
-      const defaultSelect = buildAnimationSelect(
-        "Default Animation",
-        spriteCharacter.defaultAnimation,
-        (value) => {
-          spriteCharacter.defaultAnimation = value;
-        }
-      );
-      const activeSelect = buildAnimationSelect(
-        "Active Animation",
-        spriteCharacter.activeAnimation,
-        (value) => {
-          spriteCharacter.activeAnimation = value;
-        }
-      );
-      section.append(defaultSelect, activeSelect);
-
-      const keyLegend = document.createElement("p");
-      keyLegend.className = "muted";
-      keyLegend.textContent = "Runtime key triggers:";
-      section.appendChild(keyLegend);
-
-      spriteCharacter.animations.forEach((animation) => {
-        const row = document.createElement("div");
-        row.className = "row";
-        const label = document.createElement("label");
-        label.textContent = animation.name;
-        const input = document.createElement("input");
-        input.type = "text";
-        input.placeholder = "key";
-        input.value = normalizeKeyBinding(animation.dedicatedKey);
-        input.addEventListener("input", () => {
-          pushSceneHistory();
-          animation.dedicatedKey = normalizeKeyBinding(input.value);
-          input.value = animation.dedicatedKey;
-        });
-        row.append(label, input);
-        section.appendChild(row);
-      });
-    }
-
-    inspectorFields.appendChild(section);
-  }
-
   appendSpriteInspectorSection();
   renderTriggerPresets();
 };
@@ -1883,12 +2220,6 @@ if (stopButton) {
   });
 }
 
-if (createSpriteButton) {
-  createSpriteButton.addEventListener("click", () => {
-    window.open("sprite-creator.html", "_blank");
-  });
-}
-
 if (undoSceneButton) {
   undoSceneButton.addEventListener("click", () => {
     undoSceneChange();
@@ -2093,14 +2424,14 @@ if (importSpriteFolderButton && importSpriteFolderInput) {
     importSpriteFolderInput.click();
   });
 
-  importSpriteFolderInput.addEventListener("change", (event) => {
+  importSpriteFolderInput.addEventListener("change", async (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
     const entries = files.map((file) => ({
       file,
       path: file.webkitRelativePath || file.name,
     }));
-    importSpriteEntries(entries);
+    await importSpriteEntries(entries);
     importSpriteFolderInput.value = "";
   });
 }
@@ -2171,14 +2502,14 @@ if (spriteBrowser) {
         file,
         path: file.webkitRelativePath || file.name,
       }));
-      importSpriteEntries(entries);
+      await importSpriteEntries(entries);
       return;
     }
 
     const collected = await Promise.all(
       rootEntries.map((entry) => collectDroppedSpriteEntries(entry))
     );
-    importSpriteEntries(collected.flat());
+    await importSpriteEntries(collected.flat());
   });
 }
 
@@ -2259,6 +2590,61 @@ const updateBoxHelpers = () => {
       const max = center.clone().addScaledVector(size, 0.5);
       helper.box.set(min, max);
     }
+
+    const sprite = entity.components.get(ComponentType.SpriteCharacter);
+    const spriteObject = meshCache.get(entity.id);
+    if (spriteObject?.userData?.spriteMeshOutline) {
+      spriteObject.userData.spriteMeshOutline.visible = true;
+      spriteObject.userData.spriteMeshOutline.material.color.set(
+        entity.id === selectedEntityId ? 0xffd166 : 0x4ad4a8
+      );
+      spriteObject.userData.spriteMeshOutline.update();
+    }
+
+    if (!sprite || !Array.isArray(sprite.animations) || !sprite.animations.length) {
+      const helper = spriteColliderHelpers.get(entity.id);
+      if (helper) {
+        helper.visible = false;
+      }
+      return;
+    }
+
+    const activeAnimation =
+      sprite.animations.find((animation) => animation.name === sprite.activeAnimation) ??
+      sprite.animations[0];
+    const frameIndex = Math.min(
+      Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0,
+      Math.max((activeAnimation?.frames?.length ?? 1) - 1, 0)
+    );
+    const frame = activeAnimation?.frames?.[frameIndex] ?? null;
+    const frameCollider =
+      sprite.colliderEditMode && activeAnimation
+        ? resolveSpriteColliderForFrame(activeAnimation, frameIndex)
+        : null;
+
+    const helper = spriteColliderHelpers.get(entity.id) ?? null;
+    if (!frameCollider || frameCollider.type !== "box") {
+      if (helper) {
+        helper.visible = false;
+      }
+      return;
+    }
+
+    const spriteHelper = boxHelperFor(entity, spriteColliderHelpers, 0xffd166);
+    spriteHelper.visible = true;
+    const size = new THREE.Vector3(
+      Number.isFinite(frameCollider.width) ? frameCollider.width : 1,
+      Number.isFinite(frameCollider.height) ? frameCollider.height : 1,
+      Number.isFinite(frameCollider.depth) ? frameCollider.depth : 0.2
+    ).multiply(new THREE.Vector3(...transform.scale));
+    const center = new THREE.Vector3(
+      transform.position[0] + (Number.isFinite(frameCollider.x) ? frameCollider.x : 0),
+      transform.position[1] + (Number.isFinite(frameCollider.y) ? frameCollider.y : 0),
+      transform.position[2]
+    );
+    const min = center.clone().addScaledVector(size, -0.5);
+    const max = center.clone().addScaledVector(size, 0.5);
+    spriteHelper.box.set(min, max);
   });
 };
 
@@ -2301,6 +2687,7 @@ const initMonaco = async () => {
 };
 
 const animate = () => {
+  const delta = editorClock.getDelta();
   updateCameraEntityFollowers();
   syncWorldToScene(
     engine.scene,
@@ -2310,9 +2697,12 @@ const animate = () => {
     engine.gltfLoading,
     {
       showCameraRig: true,
+      showSpriteOutlines: true,
       skipTransformIds:
         isTransformingSelectedEntity && selectedEntityId ? [selectedEntityId] : [],
-    }
+    },
+    engine.camera,
+    delta
   );
   orbitControls.update();
   updateBoxHelpers();

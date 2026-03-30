@@ -589,7 +589,7 @@ body {
   background: rgba(10, 16, 28, 0.65);
 }
 
-.sprite-preview__video {
+.sprite-preview img {
   width: 48px;
   height: 48px;
   object-fit: contain;
@@ -601,6 +601,43 @@ body {
 .sprite-preview span {
   color: var(--muted);
   font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.sprite-inspector input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.sprite-inspector input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sprite-inspector input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 1px solid rgba(8, 18, 28, 0.75);
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+}
+
+.sprite-inspector input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sprite-inspector input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(8, 18, 28, 0.75);
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
 }
 
 .asset-card {
