@@ -329,6 +329,8 @@ let selectedEntityId = null;
 let isTransformingSelectedEntity = false;
 let selectedSpriteCharacterName = null;
 let selectedSpriteAnimationName = null;
+let activeSpawnGizmoLevelId = null;
+let spawnGizmoObject = null;
 let runtimeWindow = null;
 let codeEditor = null;
 let suppressCodeEditorSync = false;
@@ -562,6 +564,103 @@ const buildVectorField = (label, values, onChange) => {
   });
 
   return { wrapper, inputs };
+};
+
+const createSpawnGizmoObject = () => {
+  const group = new THREE.Group();
+  group.name = "SpawnGizmo";
+  group.userData.renderKind = "spawnGizmo";
+
+  const coreMaterial = new THREE.MeshStandardMaterial({
+    color: 0x33d1c2,
+    emissive: 0x0d4f4b,
+    metalness: 0.15,
+    roughness: 0.35,
+  });
+  const accentMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffb357,
+    emissive: 0x553200,
+    metalness: 0.1,
+    roughness: 0.4,
+  });
+
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), coreMaterial);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.72, 12), coreMaterial);
+  stem.position.y = 0.36;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 12), accentMaterial);
+  tip.position.y = 0.87;
+  const axis = new THREE.AxesHelper(0.65);
+  axis.position.y = 0.18;
+
+  group.add(core, stem, tip, axis);
+  group.visible = false;
+  engine.scene.add(group);
+  return group;
+};
+
+const getActiveSpawnLevel = () => {
+  if (!activeSpawnGizmoLevelId) return null;
+  const normalized = ensureProjectState();
+  return getLevelById(normalized, activeSpawnGizmoLevelId);
+};
+
+const syncSpawnGizmoObject = () => {
+  if (!spawnGizmoObject) return;
+  const level = getActiveSpawnLevel();
+  if (!level) {
+    spawnGizmoObject.visible = false;
+    if (transformControls.object === spawnGizmoObject) {
+      transformControls.detach();
+    }
+    return;
+  }
+
+  const position = clampVector3(level.spawnPoint?.position, [0, 1, 0]);
+  const rotation = clampVector3(level.spawnPoint?.rotation, [0, 0, 0]);
+  spawnGizmoObject.position.set(position[0], position[1], position[2]);
+  spawnGizmoObject.rotation.set(rotation[0], rotation[1], rotation[2]);
+  spawnGizmoObject.visible = true;
+};
+
+const commitSpawnGizmoObject = () => {
+  if (!spawnGizmoObject) return false;
+  const level = getActiveSpawnLevel();
+  if (!level) return false;
+
+  syncLevelRecord(level.id, {
+    spawnPoint: {
+      ...level.spawnPoint,
+      position: [
+        spawnGizmoObject.position.x,
+        spawnGizmoObject.position.y,
+        spawnGizmoObject.position.z,
+      ],
+      rotation: [
+        spawnGizmoObject.rotation.x,
+        spawnGizmoObject.rotation.y,
+        spawnGizmoObject.rotation.z,
+      ],
+    },
+  });
+  saveDraftProject({ announce: false });
+  rebuildProjectPanels();
+  return true;
+};
+
+const setSpawnGizmoLevel = (levelId) => {
+  activeSpawnGizmoLevelId = activeSpawnGizmoLevelId === levelId ? null : levelId;
+  if (activeSpawnGizmoLevelId && !spawnGizmoObject) {
+    spawnGizmoObject = createSpawnGizmoObject();
+  }
+
+  syncSpawnGizmoObject();
+  if (activeSpawnGizmoLevelId && spawnGizmoObject) {
+    transformControls.attach(spawnGizmoObject);
+  } else if (transformControls.object === spawnGizmoObject) {
+    transformControls.detach();
+  }
+
+  rebuildProjectPanels();
 };
 
 const setPanelMessage = (panel, message) => {
@@ -2727,6 +2826,7 @@ const syncLevelRecord = (levelId, patch = {}) => {
   });
   activeSceneId = projectState.activeSceneId;
   activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  syncSpawnGizmoObject();
   return projectState;
 };
 
@@ -3075,6 +3175,12 @@ const renderLevelManager = () => {
     });
     row.appendChild(sceneSelect);
     row.appendChild(
+      createProjectButton(
+        level.id === activeSpawnGizmoLevelId ? "Editing Spawn" : "Edit Spawn",
+        () => setSpawnGizmoLevel(level.id)
+      )
+    );
+    row.appendChild(
       createProjectButton("Open", () => {
         switchProjectLevel(level.id);
       })
@@ -3147,6 +3253,11 @@ const renderLevelManager = () => {
     });
     spawnSplit.append(spawnPosition.wrapper, spawnRotation.wrapper);
     card.appendChild(spawnSplit);
+
+    const spawnHint = document.createElement("p");
+    spawnHint.className = "project-manager__meta";
+    spawnHint.textContent = "Use Edit Spawn, then Move or Rotate gizmo in the viewport to place it visually.";
+    card.appendChild(spawnHint);
 
     const requirement = document.createElement("textarea");
     requirement.value = level.completionRequirement;
@@ -3491,11 +3602,21 @@ const rebuildProjectPanels = () => {
   renderLevelManager();
   renderHudSettings();
   renderPublishPanel();
+  syncSpawnGizmoObject();
 };
 
 const selectEntity = (entityId) => {
   if (!sceneHistory.isRestoring && selectedEntityId && selectedEntityId !== entityId) {
     commitSelectedEntityTransform();
+  }
+  if (activeSpawnGizmoLevelId) {
+    activeSpawnGizmoLevelId = null;
+    if (spawnGizmoObject && transformControls.object === spawnGizmoObject) {
+      transformControls.detach();
+    }
+    if (spawnGizmoObject) {
+      spawnGizmoObject.visible = false;
+    }
   }
   selectedEntityId = entityId;
   rebuildHierarchy();
@@ -3841,6 +3962,13 @@ const getDropPosition = (event) => {
 
 transformControls.addEventListener("dragging-changed", (event) => {
   orbitControls.enabled = !event.value;
+  if (spawnGizmoObject && transformControls.object === spawnGizmoObject) {
+    isTransformingSelectedEntity = false;
+    if (!event.value) {
+      commitSpawnGizmoObject();
+    }
+    return;
+  }
   isTransformingSelectedEntity = event.value;
   if (event.value && !sceneHistory.isRestoring) {
     pushSceneHistory();
@@ -3857,6 +3985,9 @@ transformControls.addEventListener("dragging-changed", (event) => {
 });
 
 transformControls.addEventListener("objectChange", () => {
+  if (spawnGizmoObject && transformControls.object === spawnGizmoObject) {
+    return;
+  }
   if (!isTransformingSelectedEntity || !selectedEntityId) return;
   const entity = world.getEntities().find((item) => item.id === selectedEntityId);
   const object = meshCache.get(selectedEntityId);

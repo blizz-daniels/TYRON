@@ -359,8 +359,8 @@ body {
 
 .project-manager__split {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .project-manager__toggle {
@@ -463,17 +463,22 @@ body {
 
 .field {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 10px;
+}
+
+.field label {
+  grid-column: 1 / -1;
 }
 
 .field input {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
   border: 1px solid var(--panel-border);
   background: rgba(9, 14, 24, 0.7);
   color: var(--text);
+  min-width: 0;
 }
 
 .health-meter {
