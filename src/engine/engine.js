@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/GLTFLoader.js";
-import { ComponentType, createHitBox } from "./components.js";
+import { ComponentType, createCollider, createHitBox } from "./components.js";
 import {
   SpriteAnimator,
   getSpriteFrameSize,
@@ -72,6 +72,45 @@ const disposeObject3D = (object) => {
     if (child.material) {
       disposeMaterial(child.material);
     }
+  });
+};
+
+const createStaticBoundsCollider = (object, entityName = "") => {
+  const box = new THREE.Box3().setFromObject(object);
+  if (box.isEmpty()) return null;
+
+  const normalizedName = String(entityName ?? "").toLowerCase();
+  const looksLikeGround =
+    /ground|terrain|floor|world|level|environment/.test(normalizedName) ||
+    /ground|terrain|floor|world|level|environment/.test(String(object?.name ?? "").toLowerCase());
+
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  if (
+    !looksLikeGround &&
+    !(size.y <= Math.max(size.x, size.z) * 0.6 || size.y <= 1.5)
+  ) {
+    return null;
+  }
+
+  const floorThickness = Math.min(Math.max(size.y * 0.12, 0.05), 0.25);
+
+  return createCollider({
+    shape: "box",
+    body: "static",
+    size: [
+      Math.max(size.x, 0.01),
+      floorThickness,
+      Math.max(size.z, 0.01),
+    ],
+    offset: [
+      center.x,
+      box.min.y + floorThickness / 2,
+      center.z,
+    ],
   });
 };
 
@@ -512,6 +551,12 @@ export const syncWorldToScene = (
 
             holder.clear();
             holder.add(data.scene);
+            if (!entity.components.get(ComponentType.Collider)) {
+              const autoCollider = createStaticBoundsCollider(data.scene, entity.name);
+              if (autoCollider) {
+                world.addComponent(entity, autoCollider);
+              }
+            }
             holder.userData.gltfLoaded = true;
             holder.userData.gltfFailed = false;
             gltfLoading.delete(entity.id);

@@ -250,34 +250,46 @@ const engine = new Engine({
     showSpriteOutlines: true,
   },
 });
-let world = new World();
+const createDefaultEditorWorld = () => {
+  const nextWorld = new World();
+
+  const ground = nextWorld.createEntity("Ground");
+  nextWorld.addComponent(
+    ground,
+    createTransform({ position: [0, -0.5, 0], scale: [10, 0.2, 10] })
+  );
+  nextWorld.addComponent(ground, createMesh({ material: { color: "#1e2a3c" } }));
+  nextWorld.addComponent(
+    ground,
+    createCollider({ shape: "box", size: [10, 0.2, 10], body: "static" })
+  );
+
+  const player = nextWorld.createEntity("Player");
+  nextWorld.addComponent(player, createTransform({ position: [0, 1, 0] }));
+  nextWorld.addComponent(player, createMesh({ material: { color: "#ff6f91" } }));
+  nextWorld.addComponent(
+    player,
+    createCollider({ shape: "box", size: [1, 1, 1], body: "dynamic" })
+  );
+  nextWorld.addComponent(player, createPlayer());
+  nextWorld.addComponent(player, createHealth());
+
+  const prop = nextWorld.createEntity("Tower");
+  nextWorld.addComponent(
+    prop,
+    createTransform({ position: [3, 1.2, -2], scale: [1, 2.4, 1] })
+  );
+  nextWorld.addComponent(prop, createMesh({ geometry: "box", material: { color: "#7fd9ff" } }));
+
+  return nextWorld;
+};
+
+let world = createDefaultEditorWorld();
 engine.setWorld(world);
 
 const grid = new THREE.GridHelper(20, 20, 0x22304a, 0x121b2b);
 engine.scene.add(grid);
 engine.scene.add(new THREE.AxesHelper(2));
-
-const ground = world.createEntity("Ground");
-world.addComponent(ground, createTransform({ position: [0, -0.5, 0], scale: [10, 0.2, 10] }));
-world.addComponent(ground, createMesh({ material: { color: "#1e2a3c" } }));
-world.addComponent(
-  ground,
-  createCollider({ shape: "box", size: [10, 0.2, 10], body: "static" })
-);
-
-const player = world.createEntity("Player");
-world.addComponent(player, createTransform({ position: [0, 1, 0] }));
-world.addComponent(player, createMesh({ material: { color: "#ff6f91" } }));
-world.addComponent(
-  player,
-  createCollider({ shape: "box", size: [1, 1, 1], body: "dynamic" })
-);
-world.addComponent(player, createPlayer());
-world.addComponent(player, createHealth());
-
-const prop = world.createEntity("Tower");
-world.addComponent(prop, createTransform({ position: [3, 1.2, -2], scale: [1, 2.4, 1] }));
-world.addComponent(prop, createMesh({ geometry: "box", material: { color: "#7fd9ff" } }));
 
 const orbitControls = new OrbitControls(engine.camera, canvas);
 orbitControls.enableDamping = true;
@@ -2778,8 +2790,9 @@ const setStartingLevel = (levelId) => {
 };
 
 const createSceneAndLevel = (baseName = "Scene") => {
-  const normalized = ensureProjectState();
-  const scene = createSceneFromWorld(`${baseName} ${normalized.scenes.length + 1}`, world, {
+  const normalized = normalizeProject(syncCurrentSceneIntoProject());
+  const nextWorld = createDefaultEditorWorld();
+  const scene = createSceneFromWorld(`${baseName} ${normalized.scenes.length + 1}`, nextWorld, {
     order: normalized.scenes.length,
   });
   const level = createLevelFromScene(scene, {
@@ -2799,6 +2812,7 @@ const createSceneAndLevel = (baseName = "Scene") => {
   });
   activeSceneId = scene.id;
   activeLevelId = projectState.runtime.startingLevelId;
+  setWorld(nextWorld, { resetHistory: true });
   rebuildProjectPanels();
   updateProjectStatus();
   saveDraftProject({ announce: false });

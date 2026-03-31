@@ -51,6 +51,18 @@ export class PhysicsSystem {
     if (!this.world) return;
     if (this.bodies.has(entity.id)) return;
 
+    const scale = Array.isArray(transform.scale) && transform.scale.length >= 3
+      ? transform.scale
+      : [1, 1, 1];
+    const offset = Array.isArray(collider.offset) && collider.offset.length >= 3
+      ? collider.offset
+      : [0, 0, 0];
+    const scaledOffset = [
+      offset[0] * scale[0],
+      offset[1] * scale[1],
+      offset[2] * scale[2],
+    ];
+
     let desc;
     if (collider.body === "dynamic") {
       desc = this.rapier.RigidBodyDesc.dynamic();
@@ -78,14 +90,27 @@ export class PhysicsSystem {
 
     let colliderDesc;
     if (collider.shape === "sphere") {
-      const radius = collider.size[0] / 2;
+      const size = Array.isArray(collider.size) && collider.size.length >= 3
+        ? collider.size
+        : [1, 1, 1];
+      const radius = Math.max(
+        Math.abs(size[0] * scale[0]),
+        Math.abs(size[1] * scale[1]),
+        Math.abs(size[2] * scale[2])
+      ) / 2;
       colliderDesc = this.rapier.ColliderDesc.ball(radius);
     } else {
+      const size = Array.isArray(collider.size) && collider.size.length >= 3
+        ? collider.size
+        : [1, 1, 1];
       colliderDesc = this.rapier.ColliderDesc.cuboid(
-        collider.size[0] / 2,
-        collider.size[1] / 2,
-        collider.size[2] / 2
+        Math.max(Math.abs(size[0] * scale[0]), 0.001) / 2,
+        Math.max(Math.abs(size[1] * scale[1]), 0.001) / 2,
+        Math.max(Math.abs(size[2] * scale[2]), 0.001) / 2
       );
+    }
+    if (typeof colliderDesc.setTranslation === "function") {
+      colliderDesc.setTranslation(scaledOffset[0], scaledOffset[1], scaledOffset[2]);
     }
     if (collider.isTrigger && colliderDesc.setSensor) {
       colliderDesc.setSensor(true);

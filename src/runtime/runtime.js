@@ -946,12 +946,13 @@ const getEntityWorldCenter = (entity) => {
   const body = physics.getBody(entity.id);
   const translation = body?.translation?.() ?? null;
   const transform = entity.components.get(ComponentType.Transform);
+  const scale = transform ? clampVector3(transform.scale, [1, 1, 1]) : [1, 1, 1];
   const offset = collider ? clampVector3(collider.offset, [0, 0, 0]) : [0, 0, 0];
 
   return new THREE.Vector3(
-    (translation?.x ?? transform?.position?.[0] ?? 0) + offset[0],
-    (translation?.y ?? transform?.position?.[1] ?? 0) + offset[1],
-    (translation?.z ?? transform?.position?.[2] ?? 0) + offset[2]
+    (translation?.x ?? transform?.position?.[0] ?? 0) + offset[0] * scale[0],
+    (translation?.y ?? transform?.position?.[1] ?? 0) + offset[1] * scale[1],
+    (translation?.z ?? transform?.position?.[2] ?? 0) + offset[2] * scale[2]
   );
 };
 
@@ -2029,6 +2030,9 @@ const shouldIgnoreGameInput = (event) => {
 const setMoveState = (action, isActive) => {
   if (!(action in inputState)) return;
   inputState[action] = isActive;
+  if (action === "jump" && !isActive) {
+    movementState.jumpPrimed = false;
+  }
 };
 
 const setOrbitState = (action, isActive) => {
