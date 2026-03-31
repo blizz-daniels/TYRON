@@ -7,8 +7,8 @@ import {
   createTransform,
   createMesh,
   createCollider,
+  createHealth,
   createHitBox,
-  createHurtBox,
   createPlayer,
   createCamera,
   createGltf,
@@ -19,6 +19,7 @@ import {
 import {
   loadSpriteCharactersFromEntries,
   cloneSpriteCollider,
+  cloneSpriteCombatBox,
   createDefaultSpriteCollider,
   resolveSpriteColliderForFrame,
 } from "./src/engine/sprite-animation.js";
@@ -27,6 +28,9 @@ import { serializeScene, deserializeScene } from "./src/engine/scene-io.js";
 const canvas = document.getElementById("viewport");
 const hierarchyList = document.getElementById("hierarchyList");
 const inspectorFields = document.getElementById("inspectorFields");
+const colliderFields = document.getElementById("colliderFields");
+const playerFields = document.getElementById("playerFields");
+const spriteInspectorFields = document.getElementById("spriteInspectorFields");
 const status = document.getElementById("viewportStatus");
 const addEntityButton = document.getElementById("addEntity");
 const addCameraEntityButton = document.getElementById("addCameraEntity");
@@ -42,11 +46,14 @@ const uploadedList = document.getElementById("uploadedList");
 const spriteBrowser = document.getElementById("spriteBrowser");
 const triggerPresetButtons = document.getElementById("triggerPresetButtons");
 const triggerPresetHint = document.getElementById("triggerPresetHint");
+const editTabButtons = Array.from(document.querySelectorAll("[data-edit-tab]"));
+const editPanels = Array.from(document.querySelectorAll("[data-edit-panel]"));
 const importedAssets = [];
 const worldAssets = [];
 const uploadedAssets = [];
 const spriteCharacters = [];
 let renderAssets = () => {};
+let activeEditTab = "offset";
 const SCRIPT_TEMPLATE = `// Attach scripts to entities.
 // Try helpers like:
 // api.onTriggerEnter((self, other) => { ... })
@@ -56,6 +63,28 @@ function update(entity, dt, world, THREE, engine, api) {
   // TODO: player movement
 }
 `;
+
+const activateEditTab = (tabName, { focus = false } = {}) => {
+  const nextTab = tabName || "offset";
+  activeEditTab = nextTab;
+  editTabButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.editTab === nextTab);
+  });
+  editPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.editPanel === nextTab);
+  });
+
+  if (nextTab === "code" && codeEditor) {
+    requestAnimationFrame(() => {
+      codeEditor.layout();
+    });
+  }
+
+  if (focus) {
+    const activeButton = editTabButtons.find((button) => button.dataset.editTab === nextTab);
+    activeButton?.focus?.();
+  }
+};
 
 const buildTriggerPresetSource = (body) => `let wired = false;
 
@@ -197,6 +226,7 @@ world.addComponent(
   createCollider({ shape: "box", size: [1, 1, 1], body: "dynamic" })
 );
 world.addComponent(player, createPlayer());
+world.addComponent(player, createHealth());
 
 const prop = world.createEntity("Tower");
 world.addComponent(prop, createTransform({ position: [3, 1.2, -2], scale: [1, 2.4, 1] }));
@@ -235,7 +265,6 @@ const editorClock = new THREE.Clock();
 const meshCache = engine.cache;
 const colliderHelpers = new Map();
 const hitBoxHelpers = new Map();
-const hurtBoxHelpers = new Map();
 const spriteColliderHelpers = new Map();
 let selectedEntityId = null;
 let isTransformingSelectedEntity = false;
@@ -472,6 +501,47 @@ const buildVectorField = (label, values, onChange) => {
   return { wrapper, inputs };
 };
 
+const setPanelMessage = (panel, message) => {
+  if (!panel) return;
+  panel.innerHTML = `<p class="muted">${message}</p>`;
+};
+
+const routeInspectorSections = () => {
+  if (!inspectorFields) return;
+
+  const colliderTitles = new Set(["Collider", "Hit Box"]);
+  const playerTitles = new Set(["Player", "Health"]);
+
+  if (colliderFields) {
+    colliderFields.innerHTML = "";
+  }
+  if (playerFields) {
+    playerFields.innerHTML = "";
+  }
+
+  const sections = Array.from(inspectorFields.children);
+  sections.forEach((section) => {
+    const title =
+      section.querySelector("label")?.textContent?.trim() ??
+      section.querySelector(".panel__header label")?.textContent?.trim() ??
+      "";
+    if (colliderFields && colliderTitles.has(title)) {
+      colliderFields.appendChild(section);
+      return;
+    }
+    if (playerFields && playerTitles.has(title)) {
+      playerFields.appendChild(section);
+    }
+  });
+
+  if (colliderFields && !colliderFields.children.length) {
+    setPanelMessage(colliderFields, "Select an entity with a collider or hit box.");
+  }
+  if (playerFields && !playerFields.children.length) {
+    setPanelMessage(playerFields, "Select an entity with player or health components.");
+  }
+};
+
 function deleteEntity(entityId) {
   pushSceneHistory();
   const object = meshCache.get(entityId);
@@ -488,11 +558,6 @@ function deleteEntity(entityId) {
   if (hitHelper) {
     engine.scene.remove(hitHelper);
     hitBoxHelpers.delete(entityId);
-  }
-  const hurtHelper = hurtBoxHelpers.get(entityId);
-  if (hurtHelper) {
-    engine.scene.remove(hurtHelper);
-    hurtBoxHelpers.delete(entityId);
   }
   world.destroyEntity(entityId);
   const next = world.getEntities()[0];
@@ -558,19 +623,19 @@ const addCollisionBoxToEntity = (entity) => {
   rebuildInspector();
 };
 
+const addHealthToEntity = (entity) => {
+  if (!entity || entity.components.has(ComponentType.Health)) return;
+  pushSceneHistory();
+  world.addComponent(entity, createHealth());
+  status.textContent = `Added health to ${entity.name}.`;
+  rebuildInspector();
+};
+
 const addHitBoxToEntity = (entity) => {
   if (!entity || entity.components.has(ComponentType.HitBox)) return;
   pushSceneHistory();
   world.addComponent(entity, createHitBox());
   status.textContent = `Added hit box to ${entity.name}.`;
-  rebuildInspector();
-};
-
-const addHurtBoxToEntity = (entity) => {
-  if (!entity || entity.components.has(ComponentType.HurtBox)) return;
-  pushSceneHistory();
-  world.addComponent(entity, createHurtBox());
-  status.textContent = `Added hurt box to ${entity.name}.`;
   rebuildInspector();
 };
 
@@ -600,6 +665,10 @@ const makeEntityPlayablePlayer = (entity) => {
     world.addComponent(entity, playerComponent);
   }
   playerComponent.enabled = true;
+
+  if (!entity.components.has(ComponentType.Health)) {
+    world.addComponent(entity, createHealth());
+  }
 
   const collider = entity.components.get(ComponentType.Collider);
   if (!collider) {
@@ -781,6 +850,10 @@ const cloneSpriteAnimation = (animation) => ({
             : {},
       }))
     : [],
+  hitBox:
+    animation?.hitBox && typeof animation.hitBox === "object"
+      ? cloneSpriteCombatBox(animation.hitBox)
+      : null,
   blendMode: animation?.blendMode ?? "replace",
   stateMachine:
     animation?.stateMachine && typeof animation.stateMachine === "object"
@@ -824,14 +897,39 @@ const buildSpriteAnimationJson = (animation) => {
           : []
       )
     : [];
+  const frames = Array.isArray(animation?.frames)
+    ? animation.frames.map((frame, index) => ({
+        index: Number.isFinite(frame?.index) ? Math.max(0, Math.floor(frame.index)) : index,
+        name: frame?.name ?? `frame_${String(index + 1).padStart(3, "0")}`,
+        relativePath:
+          typeof frame?.relativePath === "string" && frame.relativePath
+            ? frame.relativePath
+            : `${frame?.name ?? `frame_${String(index + 1).padStart(3, "0")}`}.png`,
+        collider: frame?.collider ? cloneSpriteColliderBox(frame.collider) : null,
+        events: Array.isArray(frame?.events)
+          ? frame.events.map((event) => ({
+              frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : index,
+              type: event?.type ?? "frame",
+              data:
+                event && typeof event.data === "object" && !Array.isArray(event.data)
+                  ? { ...event.data }
+                  : {},
+            }))
+          : [],
+      }))
+    : [];
 
   return {
     name: animation?.name ?? "idle",
     fps: Number.isFinite(animation?.fps) ? animation.fps : 12,
     loop: animation?.loop !== false,
     blendMode: animation?.blendMode ?? "replace",
-    dedicatedKey: normalizeKeyBinding(animation?.dedicatedKey),
-    stateMachine:
+  dedicatedKey: normalizeKeyBinding(animation?.dedicatedKey),
+  hitBox:
+      animation?.hitBox && typeof animation.hitBox === "object"
+        ? cloneSpriteCombatBox(animation.hitBox)
+        : null,
+  stateMachine:
       animation?.stateMachine && typeof animation.stateMachine === "object"
         ? { ...animation.stateMachine }
         : null,
@@ -839,6 +937,7 @@ const buildSpriteAnimationJson = (animation) => {
       animation?.spriteSheet && typeof animation.spriteSheet === "object"
         ? { ...animation.spriteSheet }
         : null,
+    frames,
     colliders,
     events,
     frameEvents,
@@ -950,6 +1049,22 @@ const upsertSpriteCharacter = (nextCharacter) => {
     }
   });
 
+  nextCharacter.hitReactionAnimation =
+    normalizeKeyBinding(existingCharacter.hitReactionAnimation) ||
+    normalizeKeyBinding(nextCharacter.hitReactionAnimation);
+  nextCharacter.hitReactionPhysicsEnabled =
+    existingCharacter.hitReactionPhysicsEnabled ?? nextCharacter.hitReactionPhysicsEnabled;
+  nextCharacter.hitReactionPhysicsOffset = Array.isArray(
+    existingCharacter.hitReactionPhysicsOffset
+  )
+    ? [...existingCharacter.hitReactionPhysicsOffset]
+    : nextCharacter.hitReactionPhysicsOffset;
+  nextCharacter.hitReactionFallOver =
+    existingCharacter.hitReactionFallOver ?? nextCharacter.hitReactionFallOver;
+  nextCharacter.hitReactionSkipPhysicsWhenAnimation =
+    existingCharacter.hitReactionSkipPhysicsWhenAnimation ??
+    nextCharacter.hitReactionSkipPhysicsWhenAnimation;
+
   revokeSpriteCharacterUrls(existingCharacter);
   spriteCharacters.splice(existingIndex, 1, nextCharacter);
   spriteCharacters.sort((a, b) => sortByNaturalName(a.name, b.name));
@@ -985,6 +1100,7 @@ const importSpriteEntries = async (entries) => {
     ensureSpriteSelection();
     renderSpriteBrowser();
     rebuildInspector();
+    activateEditTab("sprite");
     status.textContent = `Imported ${loadedCharacters.length} character folder(s), ${animationCount} animation(s), and ${frameCount} frame(s).`;
   } catch (error) {
     console.warn("Sprite import failed:", error);
@@ -1011,6 +1127,11 @@ const addSpriteCharacterToScene = (character) => {
       activeFrameIndex: 0,
       playing: true,
       colliderEditMode: false,
+      hitReactionAnimation: character.hitReactionAnimation,
+      hitReactionPhysicsEnabled: character.hitReactionPhysicsEnabled,
+      hitReactionPhysicsOffset: character.hitReactionPhysicsOffset,
+      hitReactionFallOver: character.hitReactionFallOver,
+      hitReactionSkipPhysicsWhenAnimation: character.hitReactionSkipPhysicsWhenAnimation,
     })
   );
   selectedSpriteCharacterName = character.name;
@@ -1018,6 +1139,7 @@ const addSpriteCharacterToScene = (character) => {
   selectEntity(entity.id);
   renderSpriteBrowser();
   rebuildInspector();
+  activateEditTab("offset");
   status.textContent = `Added sprite character ${character.name} to scene.`;
 };
 
@@ -1029,8 +1151,122 @@ const getSelectedSpriteAnimationData = () => {
   return { character, animation };
 };
 
+const refreshSpriteCombatFlag = (character) => {
+  if (!character) return;
+  character.combatBoxes = Boolean(
+    Array.isArray(character.animations) &&
+      character.animations.some((animation) => Boolean(animation.hitBox))
+  );
+};
+
+const ensureSpriteCombatBox = (animation, key, defaults = {}) => {
+  if (!animation) return null;
+  const nextBox = animation[key] ? cloneSpriteCombatBox(animation[key]) : cloneSpriteCombatBox(defaults);
+  animation[key] = nextBox;
+  return nextBox;
+};
+
+const clearSpriteCombatBox = (animation, key) => {
+  if (!animation) return;
+  animation[key] = null;
+};
+
+const appendCombatBoxEditor = (
+  section,
+  animation,
+  key,
+  labelText,
+  owner = null,
+  { withDamage = false } = {}
+) => {
+  const box = animation?.[key] ?? null;
+  const headerRow = document.createElement("div");
+  headerRow.className = "row";
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  const actionButton = document.createElement("button");
+  actionButton.type = "button";
+  actionButton.className = "btn btn--ghost btn--small";
+  actionButton.textContent = box ? "Clear" : "Add";
+    actionButton.addEventListener("click", () => {
+      pushSceneHistory();
+      if (animation[key]) {
+        clearSpriteCombatBox(animation, key);
+    } else {
+      ensureSpriteCombatBox(
+        animation,
+        key,
+        key === "hitBox"
+          ? { damage: 10, width: 0.8, height: 0.8, depth: 0.2 }
+          : { width: 0.8, height: 1.4, depth: 0.2 }
+      );
+      }
+    refreshSpriteCombatFlag(owner);
+    rebuildInspector();
+    renderSpriteBrowser();
+  });
+  headerRow.append(label, actionButton);
+  section.appendChild(headerRow);
+
+  if (!box) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = `No ${labelText.toLowerCase()} set for this animation.`;
+    section.appendChild(empty);
+    return;
+  }
+
+  const fields = [
+    ["x", "X"],
+    ["y", "Y"],
+    ["width", "Width"],
+    ["height", "Height"],
+    ["depth", "Depth"],
+  ];
+
+  fields.forEach(([keyName, displayName]) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const fieldLabel = document.createElement("label");
+    fieldLabel.textContent = displayName;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "0.1";
+    input.value = String(Number.isFinite(box[keyName]) ? box[keyName] : 0);
+    input.addEventListener("input", () => {
+      pushSceneHistory();
+      box[keyName] = Number.parseFloat(input.value) || 0;
+      ensureSpriteCombatBox(animation, key, box);
+      refreshSpriteCombatFlag(owner);
+    });
+    row.append(fieldLabel, input);
+    section.appendChild(row);
+  });
+
+  if (withDamage) {
+    const damageRow = document.createElement("div");
+    damageRow.className = "row";
+    const damageLabel = document.createElement("label");
+    damageLabel.textContent = "Damage";
+    const damageInput = document.createElement("input");
+    damageInput.type = "number";
+    damageInput.step = "0.1";
+    damageInput.min = "0";
+    damageInput.value = String(Number.isFinite(box.damage) ? box.damage : 10);
+    damageInput.addEventListener("input", () => {
+      pushSceneHistory();
+      const value = Number.parseFloat(damageInput.value);
+      box.damage = Number.isFinite(value) && value >= 0 ? value : 10;
+      ensureSpriteCombatBox(animation, key, box);
+      refreshSpriteCombatFlag(owner);
+    });
+    damageRow.append(damageLabel, damageInput);
+    section.appendChild(damageRow);
+  }
+};
+
 const appendSpriteInspectorSection = () => {
-  if (!inspectorFields) return;
+  if (!spriteInspectorFields) return;
 
   const section = document.createElement("div");
   section.className = "sprite-inspector";
@@ -1147,6 +1383,88 @@ const appendSpriteInspectorSection = () => {
     });
     animationRow.append(animationLabel, animationSelect);
     section.appendChild(animationRow);
+
+    const hitReactionField = document.createElement("div");
+    hitReactionField.className = "row";
+    const hitReactionLabel = document.createElement("label");
+    hitReactionLabel.textContent = "Hit Reaction";
+    const hitReactionInput = document.createElement("input");
+    hitReactionInput.type = "text";
+    hitReactionInput.placeholder = "auto";
+    hitReactionInput.value = spriteCharacter.hitReactionAnimation ?? "";
+    hitReactionInput.addEventListener("input", () => {
+      pushSceneHistory();
+      spriteCharacter.hitReactionAnimation = normalizeKeyBinding(hitReactionInput.value);
+      hitReactionInput.value = spriteCharacter.hitReactionAnimation;
+    });
+    hitReactionField.append(hitReactionLabel, hitReactionInput);
+    section.appendChild(hitReactionField);
+
+    if (!Array.isArray(spriteCharacter.hitReactionPhysicsOffset)) {
+      spriteCharacter.hitReactionPhysicsOffset = [0.45, 0.18, 0.45];
+    }
+
+    const hitPhysicsSection = document.createElement("div");
+    hitPhysicsSection.innerHTML = "<label>Hit Physics</label>";
+
+    const physicsEnabledRow = document.createElement("div");
+    physicsEnabledRow.className = "row";
+    const physicsEnabledLabel = document.createElement("label");
+    physicsEnabledLabel.textContent = "Use Physics";
+    const physicsEnabledInput = document.createElement("input");
+    physicsEnabledInput.type = "checkbox";
+    physicsEnabledInput.checked = spriteCharacter.hitReactionPhysicsEnabled !== false;
+    physicsEnabledInput.addEventListener("change", () => {
+      pushSceneHistory();
+      spriteCharacter.hitReactionPhysicsEnabled = physicsEnabledInput.checked;
+    });
+    physicsEnabledRow.append(physicsEnabledLabel, physicsEnabledInput);
+    hitPhysicsSection.appendChild(physicsEnabledRow);
+
+    const physicsOffset = buildVectorField(
+      "Knockback Offset",
+      spriteCharacter.hitReactionPhysicsOffset,
+      (index, value) => {
+        spriteCharacter.hitReactionPhysicsOffset[index] = value;
+      }
+    );
+    hitPhysicsSection.appendChild(physicsOffset.wrapper);
+
+    const fallOverRow = document.createElement("div");
+    fallOverRow.className = "row";
+    const fallOverLabel = document.createElement("label");
+    fallOverLabel.textContent = "Fall Over";
+    const fallOverInput = document.createElement("input");
+    fallOverInput.type = "checkbox";
+    fallOverInput.checked = Boolean(spriteCharacter.hitReactionFallOver);
+    fallOverInput.addEventListener("change", () => {
+      pushSceneHistory();
+      spriteCharacter.hitReactionFallOver = fallOverInput.checked;
+    });
+    fallOverRow.append(fallOverLabel, fallOverInput);
+    hitPhysicsSection.appendChild(fallOverRow);
+
+    const skipPhysicsRow = document.createElement("div");
+    skipPhysicsRow.className = "row";
+    const skipPhysicsLabel = document.createElement("label");
+    skipPhysicsLabel.textContent = "Skip if Hit Anim";
+    const skipPhysicsInput = document.createElement("input");
+    skipPhysicsInput.type = "checkbox";
+    skipPhysicsInput.checked = spriteCharacter.hitReactionSkipPhysicsWhenAnimation !== false;
+    skipPhysicsInput.addEventListener("change", () => {
+      pushSceneHistory();
+      spriteCharacter.hitReactionSkipPhysicsWhenAnimation = skipPhysicsInput.checked;
+    });
+    skipPhysicsRow.append(skipPhysicsLabel, skipPhysicsInput);
+    hitPhysicsSection.appendChild(skipPhysicsRow);
+
+    const hitPhysicsHint = document.createElement("p");
+    hitPhysicsHint.className = "muted";
+    hitPhysicsHint.textContent =
+      "When a hit reaction animation exists, this physics push can be skipped automatically.";
+    hitPhysicsSection.appendChild(hitPhysicsHint);
+
+    section.appendChild(hitPhysicsSection);
 
     if (activeAnimation) {
       const fpsRow = document.createElement("div");
@@ -1291,6 +1609,22 @@ const appendSpriteInspectorSection = () => {
         depthRow.append(depthLabel, depthInput);
         section.appendChild(depthRow);
       }
+
+      const combatSection = document.createElement("div");
+      combatSection.innerHTML = "<label>Combat Boxes</label>";
+      const combatHint = document.createElement("p");
+      combatHint.className = "muted";
+      combatHint.textContent = "This hit box activates only for this animation.";
+      combatSection.appendChild(combatHint);
+      appendCombatBoxEditor(
+        combatSection,
+        activeAnimation,
+        "hitBox",
+        "Hit Box",
+        spriteCharacter,
+        { withDamage: true }
+      );
+      section.appendChild(combatSection);
     }
 
     const keyLegend = document.createElement("p");
@@ -1315,7 +1649,7 @@ const appendSpriteInspectorSection = () => {
       row.append(label, input);
       section.appendChild(row);
     });
-    inspectorFields.appendChild(section);
+    spriteInspectorFields.appendChild(section);
     return;
   }
 
@@ -1325,7 +1659,7 @@ const appendSpriteInspectorSection = () => {
     empty.className = "muted";
     empty.textContent = "Select a sprite character in the browser to inspect its animations.";
     section.appendChild(empty);
-    inspectorFields.appendChild(section);
+    spriteInspectorFields.appendChild(section);
     return;
   }
 
@@ -1374,6 +1708,99 @@ const appendSpriteInspectorSection = () => {
   keyBindingField.append(keyBindingLabel, keyBindingInput);
   section.appendChild(keyBindingField);
 
+  const hitReactionField = document.createElement("div");
+  hitReactionField.className = "row";
+  const hitReactionLabel = document.createElement("label");
+  hitReactionLabel.textContent = "Hit Reaction";
+  const hitReactionInput = document.createElement("input");
+  hitReactionInput.type = "text";
+  hitReactionInput.placeholder = "auto";
+  hitReactionInput.value = character.hitReactionAnimation ?? "";
+  hitReactionInput.addEventListener("input", () => {
+    pushSceneHistory();
+    character.hitReactionAnimation = normalizeKeyBinding(hitReactionInput.value);
+    hitReactionInput.value = character.hitReactionAnimation;
+  });
+  hitReactionField.append(hitReactionLabel, hitReactionInput);
+  section.appendChild(hitReactionField);
+
+  if (!Array.isArray(character.hitReactionPhysicsOffset)) {
+    character.hitReactionPhysicsOffset = [0.45, 0.18, 0.45];
+  }
+
+  const hitPhysicsSection = document.createElement("div");
+  hitPhysicsSection.innerHTML = "<label>Hit Physics</label>";
+
+  const physicsEnabledRow = document.createElement("div");
+  physicsEnabledRow.className = "row";
+  const physicsEnabledLabel = document.createElement("label");
+  physicsEnabledLabel.textContent = "Use Physics";
+  const physicsEnabledInput = document.createElement("input");
+  physicsEnabledInput.type = "checkbox";
+  physicsEnabledInput.checked = character.hitReactionPhysicsEnabled !== false;
+  physicsEnabledInput.addEventListener("change", () => {
+    pushSceneHistory();
+    character.hitReactionPhysicsEnabled = physicsEnabledInput.checked;
+  });
+  physicsEnabledRow.append(physicsEnabledLabel, physicsEnabledInput);
+  hitPhysicsSection.appendChild(physicsEnabledRow);
+
+  const browserPhysicsOffset = buildVectorField(
+    "Knockback Offset",
+    character.hitReactionPhysicsOffset,
+    (index, value) => {
+      character.hitReactionPhysicsOffset[index] = value;
+    }
+  );
+  hitPhysicsSection.appendChild(browserPhysicsOffset.wrapper);
+
+  const browserFallOverRow = document.createElement("div");
+  browserFallOverRow.className = "row";
+  const browserFallOverLabel = document.createElement("label");
+  browserFallOverLabel.textContent = "Fall Over";
+  const browserFallOverInput = document.createElement("input");
+  browserFallOverInput.type = "checkbox";
+  browserFallOverInput.checked = Boolean(character.hitReactionFallOver);
+  browserFallOverInput.addEventListener("change", () => {
+    pushSceneHistory();
+    character.hitReactionFallOver = browserFallOverInput.checked;
+  });
+  browserFallOverRow.append(browserFallOverLabel, browserFallOverInput);
+  hitPhysicsSection.appendChild(browserFallOverRow);
+
+  const browserSkipPhysicsRow = document.createElement("div");
+  browserSkipPhysicsRow.className = "row";
+  const browserSkipPhysicsLabel = document.createElement("label");
+  browserSkipPhysicsLabel.textContent = "Skip if Hit Anim";
+  const browserSkipPhysicsInput = document.createElement("input");
+  browserSkipPhysicsInput.type = "checkbox";
+  browserSkipPhysicsInput.checked = character.hitReactionSkipPhysicsWhenAnimation !== false;
+  browserSkipPhysicsInput.addEventListener("change", () => {
+    pushSceneHistory();
+    character.hitReactionSkipPhysicsWhenAnimation = browserSkipPhysicsInput.checked;
+  });
+  browserSkipPhysicsRow.append(browserSkipPhysicsLabel, browserSkipPhysicsInput);
+  hitPhysicsSection.appendChild(browserSkipPhysicsRow);
+
+  const browserHitPhysicsHint = document.createElement("p");
+  browserHitPhysicsHint.className = "muted";
+  browserHitPhysicsHint.textContent =
+    "Knockback and fall-over apply on hit unless a hit animation is playing and skip is enabled.";
+  hitPhysicsSection.appendChild(browserHitPhysicsHint);
+
+  section.appendChild(hitPhysicsSection);
+
+  const combatSection = document.createElement("div");
+  combatSection.innerHTML = "<label>Combat Boxes</label>";
+  const combatHint = document.createElement("p");
+  combatHint.className = "muted";
+  combatHint.textContent = "This hit box activates only for this animation.";
+  combatSection.appendChild(combatHint);
+  appendCombatBoxEditor(combatSection, animation, "hitBox", "Hit Box", character, {
+    withDamage: true,
+  });
+  section.appendChild(combatSection);
+
   const ensureFrameCollider = (frame) => {
     if (!frame) return null;
     if (!Array.isArray(animation.colliders)) {
@@ -1419,7 +1846,13 @@ const appendSpriteInspectorSection = () => {
       section.appendChild(row);
     });
   }
-  inspectorFields.appendChild(section);
+  spriteInspectorFields.appendChild(section);
+};
+
+const rebuildSpriteInspector = () => {
+  if (!spriteInspectorFields) return;
+  spriteInspectorFields.innerHTML = "";
+  appendSpriteInspectorSection();
 };
 
 const renderSpriteBrowser = () => {
@@ -1452,6 +1885,7 @@ const renderSpriteBrowser = () => {
     nameButton.addEventListener("click", () => {
       selectedSpriteCharacterName = character.name;
       ensureSpriteSelection();
+      activateEditTab("sprite");
       renderSpriteBrowser();
       rebuildInspector();
       status.textContent = `Selected sprite character: ${character.name}.`;
@@ -1493,6 +1927,7 @@ const renderSpriteBrowser = () => {
           event.stopPropagation();
           selectedSpriteCharacterName = character.name;
           selectedSpriteAnimationName = animation.name;
+          activateEditTab("sprite");
           renderSpriteBrowser();
           rebuildInspector();
           status.textContent = `Editing ${character.name}/${animation.name} boxes.`;
@@ -1540,11 +1975,15 @@ const renderSpriteBrowser = () => {
 const rebuildInspector = () => {
   if (!inspectorFields) return;
   inspectorFields.innerHTML = "";
+  if (colliderFields) colliderFields.innerHTML = "";
+  if (playerFields) playerFields.innerHTML = "";
   const entity = world.getEntities().find((item) => item.id === selectedEntityId);
   if (!entity) {
-    inspectorFields.innerHTML = '<p class="muted">Select an entity to edit its components.</p>';
-    appendSpriteInspectorSection();
+    setPanelMessage(inspectorFields, "Select an entity to edit its components.");
+    setPanelMessage(colliderFields, "Select an entity with a collider or hit box.");
+    setPanelMessage(playerFields, "Select an entity with player or health components.");
     renderTriggerPresets();
+    rebuildSpriteInspector();
     return;
   }
 
@@ -1600,20 +2039,20 @@ const rebuildInspector = () => {
     addRow.appendChild(addTriggerBtn);
     hasAddButtons = true;
   }
+  if (!entity.components.has(ComponentType.Health)) {
+    const addHealthBtn = document.createElement("button");
+    addHealthBtn.className = "btn btn--ghost btn--small";
+    addHealthBtn.textContent = "Add Health";
+    addHealthBtn.addEventListener("click", () => addHealthToEntity(entity));
+    addRow.appendChild(addHealthBtn);
+    hasAddButtons = true;
+  }
   if (!entity.components.has(ComponentType.HitBox)) {
     const addHitBtn = document.createElement("button");
     addHitBtn.className = "btn btn--ghost btn--small";
     addHitBtn.textContent = "Add Hit Box";
     addHitBtn.addEventListener("click", () => addHitBoxToEntity(entity));
     addRow.appendChild(addHitBtn);
-    hasAddButtons = true;
-  }
-  if (!entity.components.has(ComponentType.HurtBox)) {
-    const addHurtBtn = document.createElement("button");
-    addHurtBtn.className = "btn btn--ghost btn--small";
-    addHurtBtn.textContent = "Add Hurt Box";
-    addHurtBtn.addEventListener("click", () => addHurtBoxToEntity(entity));
-    addRow.appendChild(addHurtBtn);
     hasAddButtons = true;
   }
   if (!entity.components.has(ComponentType.Player)) {
@@ -1771,46 +2210,37 @@ const rebuildInspector = () => {
     if (!Array.isArray(hitBox.offset)) {
       hitBox.offset = [0, 0, 0];
     }
+    if (hitBox.sourceAnimation) {
+      const info = document.createElement("p");
+      info.className = "muted";
+      info.textContent = `Driven by animation: ${hitBox.sourceAnimation}${
+        hitBox.enabled === false ? " (inactive right now)" : ""
+      }`;
+      section.appendChild(info);
+    }
     const size = buildVectorField("Size", hitBox.size, (index, value) => {
       hitBox.size[index] = value;
     });
     const offset = buildVectorField("Offset", hitBox.offset, (index, value) => {
       hitBox.offset[index] = value;
     });
-    section.append(header, size.wrapper, offset.wrapper);
-    inspectorFields.appendChild(section);
-  }
-
-  const hurtBox = entity.components.get(ComponentType.HurtBox);
-  if (hurtBox) {
-    const section = document.createElement("div");
-    const header = document.createElement("div");
-    header.className = "row";
-    header.style.justifyContent = "space-between";
-    header.style.alignItems = "center";
-    const label = document.createElement("label");
-    label.textContent = "Hurt Box";
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "btn btn--ghost btn--small";
-    deleteBtn.textContent = "Delete Hurt Box";
-    deleteBtn.addEventListener("click", () =>
-      removeComponentFromEntity(
-        entity,
-        ComponentType.HurtBox,
-        `Removed hurt box from ${entity.name}.`
-      )
-    );
-    header.append(label, deleteBtn);
-    if (!Array.isArray(hurtBox.offset)) {
-      hurtBox.offset = [0, 0, 0];
-    }
-    const size = buildVectorField("Size", hurtBox.size, (index, value) => {
-      hurtBox.size[index] = value;
+    const damageRow = document.createElement("div");
+    damageRow.className = "row";
+    const damageLabel = document.createElement("label");
+    damageLabel.textContent = "Damage";
+    const damageInput = document.createElement("input");
+    damageInput.type = "number";
+    damageInput.step = "0.1";
+    damageInput.min = "0";
+    damageInput.value = String(Number.isFinite(hitBox.damage) ? hitBox.damage : 10);
+    damageInput.addEventListener("change", () => {
+      pushSceneHistory();
+      const value = Number.parseFloat(damageInput.value);
+      hitBox.damage = Number.isFinite(value) && value >= 0 ? value : 10;
+      damageInput.value = String(hitBox.damage);
     });
-    const offset = buildVectorField("Offset", hurtBox.offset, (index, value) => {
-      hurtBox.offset[index] = value;
-    });
-    section.append(header, size.wrapper, offset.wrapper);
+    damageRow.append(damageLabel, damageInput);
+    section.append(header, damageRow, size.wrapper, offset.wrapper);
     inspectorFields.appendChild(section);
   }
 
@@ -1965,8 +2395,106 @@ const rebuildInspector = () => {
     inspectorFields.appendChild(section);
   }
 
-  appendSpriteInspectorSection();
+  const health = entity.components.get(ComponentType.Health);
+  if (health) {
+    const section = document.createElement("div");
+    section.innerHTML = "<label>Health</label>";
+
+    const summary = document.createElement("p");
+    summary.className = "muted";
+    const meter = document.createElement("div");
+    meter.className = "health-meter";
+    const meterFill = document.createElement("div");
+    meterFill.className = "health-meter__fill";
+    meter.appendChild(meterFill);
+
+    const syncHealthView = () => {
+      const max = Number.isFinite(health.maxHealth) && health.maxHealth > 0 ? health.maxHealth : 100;
+      const current = Number.isFinite(health.currentHealth)
+        ? Math.min(Math.max(health.currentHealth, 0), max)
+        : max;
+      summary.textContent = `${Math.round(current)} / ${Math.round(max)} HP`;
+      meterFill.style.width = `${Math.max(Math.min((current / max) * 100, 100), 0)}%`;
+    };
+
+    const currentRow = document.createElement("div");
+    currentRow.className = "row";
+    const currentLabel = document.createElement("label");
+    currentLabel.textContent = "Current";
+    const currentInput = document.createElement("input");
+    currentInput.type = "number";
+    currentInput.step = "1";
+    currentInput.min = "0";
+    currentInput.value = String(Number.isFinite(health.currentHealth) ? health.currentHealth : 0);
+    currentInput.addEventListener("change", () => {
+      pushSceneHistory();
+      const value = Number.parseFloat(currentInput.value);
+      const max = Number.isFinite(health.maxHealth) && health.maxHealth > 0 ? health.maxHealth : 100;
+      health.currentHealth = Number.isFinite(value) ? Math.min(Math.max(value, 0), max) : max;
+      syncHealthView();
+      currentInput.value = String(health.currentHealth);
+    });
+    currentRow.append(currentLabel, currentInput);
+
+    const maxRow = document.createElement("div");
+    maxRow.className = "row";
+    const maxLabel = document.createElement("label");
+    maxLabel.textContent = "Max";
+    const maxInput = document.createElement("input");
+    maxInput.type = "number";
+    maxInput.step = "1";
+    maxInput.min = "1";
+    maxInput.value = String(Number.isFinite(health.maxHealth) ? health.maxHealth : 100);
+    maxInput.addEventListener("change", () => {
+      pushSceneHistory();
+      const value = Number.parseFloat(maxInput.value);
+      health.maxHealth = Number.isFinite(value) && value > 0 ? value : 100;
+      if (!Number.isFinite(health.currentHealth) || health.currentHealth > health.maxHealth) {
+        health.currentHealth = health.maxHealth;
+      }
+      syncHealthView();
+      maxInput.value = String(health.maxHealth);
+      currentInput.value = String(health.currentHealth);
+    });
+    maxRow.append(maxLabel, maxInput);
+
+    const regenRow = document.createElement("div");
+    regenRow.className = "row";
+    const regenLabel = document.createElement("label");
+    regenLabel.textContent = "Regen";
+    const regenInput = document.createElement("input");
+    regenInput.type = "number";
+    regenInput.step = "0.1";
+    regenInput.value = String(Number.isFinite(health.regenRate) ? health.regenRate : 0);
+    regenInput.addEventListener("change", () => {
+      pushSceneHistory();
+      const value = Number.parseFloat(regenInput.value);
+      health.regenRate = Number.isFinite(value) ? value : 0;
+      regenInput.value = String(health.regenRate);
+    });
+    regenRow.append(regenLabel, regenInput);
+
+    const invulnerableRow = document.createElement("div");
+    invulnerableRow.className = "row";
+    const invulnerableLabel = document.createElement("label");
+    invulnerableLabel.textContent = "Invulnerable";
+    const invulnerableInput = document.createElement("input");
+    invulnerableInput.type = "checkbox";
+    invulnerableInput.checked = Boolean(health.invulnerable);
+    invulnerableInput.addEventListener("change", () => {
+      pushSceneHistory();
+      health.invulnerable = invulnerableInput.checked;
+    });
+    invulnerableRow.append(invulnerableLabel, invulnerableInput);
+
+    syncHealthView();
+    section.append(summary, meter, currentRow, maxRow, regenRow, invulnerableRow);
+    inspectorFields.appendChild(section);
+  }
+
+  routeInspectorSections();
   renderTriggerPresets();
+  rebuildSpriteInspector();
 };
 
 const selectEntity = (entityId) => {
@@ -1977,6 +2505,9 @@ const selectEntity = (entityId) => {
   rebuildHierarchy();
   rebuildInspector();
   syncCodeEditorToSelection();
+  if (entityId) {
+    activateEditTab("offset");
+  }
   const object = meshCache.get(entityId);
   if (object) {
     transformControls.attach(object);
@@ -1996,8 +2527,6 @@ const setWorld = (newWorld, options = {}) => {
   colliderHelpers.clear();
   hitBoxHelpers.forEach((helper) => engine.scene.remove(helper));
   hitBoxHelpers.clear();
-  hurtBoxHelpers.forEach((helper) => engine.scene.remove(helper));
-  hurtBoxHelpers.clear();
   const first = world.getEntities()[0];
   const nextSelection = selectionId ?? (first ? first.id : null);
   selectEntity(nextSelection);
@@ -2183,6 +2712,13 @@ const activeGizmo = document.querySelector('[data-gizmo="translate"]');
 if (activeGizmo) {
   activeGizmo.classList.add("active");
 }
+
+editTabButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    activateEditTab(button.dataset.editTab);
+  });
+});
+activateEditTab(activeEditTab);
 
 const saveButton = document.getElementById("saveScene");
 const loadButton = document.getElementById("loadScene");
@@ -2574,23 +3110,6 @@ const updateBoxHelpers = () => {
       helper.box.set(min, max);
     }
 
-    const hurtBox = entity.components.get(ComponentType.HurtBox);
-    if (hurtBox) {
-      if (!Array.isArray(hurtBox.offset)) {
-        hurtBox.offset = [0, 0, 0];
-      }
-      const helper = boxHelperFor(entity, hurtBoxHelpers, 0x4dd0ff);
-      const size = new THREE.Vector3(...hurtBox.size).multiply(new THREE.Vector3(...transform.scale));
-      const center = new THREE.Vector3(
-        transform.position[0] + hurtBox.offset[0],
-        transform.position[1] + hurtBox.offset[1],
-        transform.position[2] + hurtBox.offset[2]
-      );
-      const min = center.clone().addScaledVector(size, -0.5);
-      const max = center.clone().addScaledVector(size, 0.5);
-      helper.box.set(min, max);
-    }
-
     const sprite = entity.components.get(ComponentType.SpriteCharacter);
     const spriteObject = meshCache.get(entity.id);
     if (spriteObject?.userData?.spriteMeshOutline) {
@@ -2680,6 +3199,11 @@ const initMonaco = async () => {
       });
       syncCodeEditorToSelection();
       renderTriggerPresets();
+      if (activeEditTab === "code") {
+        requestAnimationFrame(() => {
+          codeEditor?.layout?.();
+        });
+      }
     });
   } catch (error) {
     container.textContent = "Monaco failed to load. Check network or host it locally.";

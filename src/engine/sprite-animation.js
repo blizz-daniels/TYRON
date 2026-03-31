@@ -44,6 +44,38 @@ export const cloneSpriteCollider = (collider) => ({
   depth: Number.isFinite(collider?.depth) ? collider.depth : DEFAULT_COLLIDER.depth,
 });
 
+export const cloneSpriteCombatBox = (box) => ({
+  type: normalizeString(box?.type, DEFAULT_COLLIDER.type) || DEFAULT_COLLIDER.type,
+  x: Number.isFinite(box?.x) ? box.x : DEFAULT_COLLIDER.x,
+  y: Number.isFinite(box?.y) ? box.y : DEFAULT_COLLIDER.y,
+  width: Number.isFinite(box?.width) ? box.width : DEFAULT_COLLIDER.width,
+  height: Number.isFinite(box?.height) ? box.height : DEFAULT_COLLIDER.height,
+  depth: Number.isFinite(box?.depth) ? box.depth : DEFAULT_COLLIDER.depth,
+  damage: Number.isFinite(Number.parseFloat(box?.damage))
+    ? Number.parseFloat(box.damage)
+    : 10,
+});
+
+const normalizeHitReactionAnimationName = (sprite, animations) => {
+  const explicitName = normalizeString(sprite?.hitReactionAnimation, "");
+  if (explicitName) return explicitName;
+
+  const priority = ["hit", "hurt", "damaged", "damage", "react"];
+  const match = animations.find((animation) =>
+    priority.includes((animation?.name ?? "").toLowerCase())
+  );
+  return match?.name ?? "";
+};
+
+const normalizeVector3 = (value, fallback = [0.45, 0.18, 0.45]) => {
+  const source = Array.isArray(value) && value.length === 3 ? value : fallback;
+  return [
+    Number.isFinite(source[0]) ? source[0] : fallback[0],
+    Number.isFinite(source[1]) ? source[1] : fallback[1],
+    Number.isFinite(source[2]) ? source[2] : fallback[2],
+  ];
+};
+
 export const normalizeSpriteEvent = (event) => ({
   frame: Number.isFinite(event?.frame) ? Math.max(0, Math.floor(event.frame)) : 0,
   type: normalizeString(event?.type, "frame"),
@@ -106,6 +138,10 @@ export const normalizeSpriteAnimation = (animation) => {
   const events = Array.isArray(animation?.events)
     ? animation.events.map((event) => normalizeSpriteEvent(event))
     : [];
+  const hitBox =
+    animation?.hitBox && typeof animation.hitBox === "object"
+      ? cloneSpriteCombatBox(animation.hitBox)
+      : null;
 
   return {
     name: normalizeString(animation?.name, "idle") || "idle",
@@ -114,6 +150,7 @@ export const normalizeSpriteAnimation = (animation) => {
     frames,
     colliders,
     events,
+    hitBox,
     blendMode: normalizeString(animation?.blendMode, "replace") || "replace",
     dedicatedKey: normalizeString(animation?.dedicatedKey, "").toLowerCase(),
     stateMachine: animation?.stateMachine && typeof animation.stateMachine === "object"
@@ -146,6 +183,14 @@ export const normalizeSpriteCharacter = (sprite = {}) => {
         : 0,
     playing: sprite.playing !== false,
     colliderEditMode: Boolean(sprite.colliderEditMode),
+    hitReactionAnimation: normalizeHitReactionAnimationName(sprite, animations),
+    hitReactionPhysicsEnabled: sprite.hitReactionPhysicsEnabled !== false,
+    hitReactionPhysicsOffset: normalizeVector3(
+      sprite.hitReactionPhysicsOffset,
+      [0.45, 0.18, 0.45]
+    ),
+    hitReactionFallOver: Boolean(sprite.hitReactionFallOver),
+    hitReactionSkipPhysicsWhenAnimation: sprite.hitReactionSkipPhysicsWhenAnimation !== false,
     displaySize:
       Array.isArray(sprite.displaySize) && sprite.displaySize.length === 2
         ? [
@@ -244,10 +289,18 @@ export const buildRuntimeSpriteAnimation = (animation, textureCache = loadSprite
       collider: cloneSpriteCollider(entry.collider),
     })),
     events: normalized.events.map((event) => normalizeSpriteEvent(event)),
+    hitBox: normalized.hitBox ? cloneSpriteCombatBox(normalized.hitBox) : null,
     blendMode: normalized.blendMode,
     stateMachine: normalized.stateMachine,
     spriteSheet: normalized.spriteSheet,
   };
+};
+
+export const resolveSpriteCombatBoxForAnimation = (animation, kind = "hitBox") => {
+  if (!animation || kind !== "hitBox") return null;
+  const box = animation[kind];
+  if (!box || typeof box !== "object") return null;
+  return cloneSpriteCombatBox(box);
 };
 
 export const resolveSpriteColliderForFrame = (animation, frameIndex) => {
@@ -341,6 +394,7 @@ const ensureAnimationRecord = (character, animationName) => {
       frames: [],
       colliders: [],
       events: [],
+      hitBox: null,
       spriteSheet: null,
       stateMachine: null,
     });
@@ -395,6 +449,10 @@ const mergeAnimationJson = (animation, payload, fallbackAnimationName) => {
 
   if (Array.isArray(payload.events)) {
     animation.events = payload.events.map((event) => normalizeSpriteEvent(event));
+  }
+
+  if (payload.hitBox && typeof payload.hitBox === "object") {
+    animation.hitBox = cloneSpriteCombatBox(payload.hitBox);
   }
 
   if (Array.isArray(payload.frameEvents)) {

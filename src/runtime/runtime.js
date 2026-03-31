@@ -5,6 +5,8 @@ import {
   createTransform,
   createMesh,
   createCollider,
+  createHealth,
+  createHitBox,
   createPlayer,
   ComponentType,
 } from "../engine/components.js";
@@ -12,6 +14,7 @@ import {
   SpriteAnimator,
   normalizeSpriteKey as normalizeSpriteAnimationKey,
   resolveSpriteColliderForFrame,
+  resolveSpriteCombatBoxForAnimation,
 } from "../engine/sprite-animation.js";
 import { deserializeScene, serializeScene } from "../engine/scene-io.js";
 import { PhysicsSystem } from "../engine/physics.js";
@@ -19,6 +22,8 @@ import { PhysicsSystem } from "../engine/physics.js";
 const canvas = document.getElementById("runtime");
 const runtimeStatus = document.getElementById("runtimeStatus");
 const runtimeSceneLabel = document.getElementById("runtimeSceneLabel");
+const runtimeHealthText = document.getElementById("runtimeHealthText");
+const runtimeHealthFill = document.getElementById("runtimeHealthFill");
 const loadButton = document.getElementById("loadScene");
 const cameraSelect = document.getElementById("cameraSelect");
 const controls = document.querySelector(".controls");
@@ -68,6 +73,7 @@ world.addComponent(
   createCollider({ shape: "box", size: [1, 1, 1], body: "dynamic" })
 );
 world.addComponent(player, createPlayer());
+world.addComponent(player, createHealth());
 
 const physics = new PhysicsSystem();
 const scriptRunners = new Map();
@@ -103,6 +109,8 @@ let selectedCameraEntityId = null;
 let activeCameraOrbitSignature = null;
 let playerControlEnabled = true;
 let triggerPairs = new Map();
+let combatPairs = new Map();
+let spriteHitReactionState = new Map();
 
 const isEntityLike = (value) => Boolean(value && value.components instanceof Map);
 
@@ -128,6 +136,228 @@ const getColliderForEntity = (target) => {
   const entity = getComponentEntity(target, null);
   if (!entity) return null;
   return entity.components.get(ComponentType.Collider) ?? null;
+};
+
+const getHealthForEntity = (target) => {
+  const entity = getComponentEntity(target, null);
+  if (!entity) return null;
+  return entity.components.get(ComponentType.Health) ?? null;
+};
+
+const normalizeHealthComponent = (target, { createIfMissing = false } = {}) => {
+  const entity = getComponentEntity(target, null);
+  if (!entity) return null;
+
+  let health = entity.components.get(ComponentType.Health);
+  if (!health && createIfMissing) {
+    health = createHealth();
+    world.addComponent(entity, health);
+  }
+  if (!health) return null;
+
+  if (!Number.isFinite(health.maxHealth) || health.maxHealth <= 0) {
+    health.maxHealth = 100;
+  }
+  if (!Number.isFinite(health.currentHealth)) {
+    health.currentHealth = health.maxHealth;
+  }
+  health.currentHealth = Math.min(Math.max(health.currentHealth, 0), health.maxHealth);
+  health.regenRate = Number.isFinite(health.regenRate) ? health.regenRate : 0;
+  health.invulnerable = Boolean(health.invulnerable);
+  health.dead = health.currentHealth <= 0;
+  return health;
+};
+
+const setHealthValue = (target, nextValue, { createIfMissing = false } = {}) => {
+  const health = normalizeHealthComponent(target, { createIfMissing });
+  if (!health) return false;
+
+  const parsedValue = Number.parseFloat(nextValue);
+  const safeValue = Number.isFinite(parsedValue) ? parsedValue : health.currentHealth;
+  health.currentHealth = Math.min(Math.max(safeValue, 0), health.maxHealth);
+  health.dead = health.currentHealth <= 0;
+  return true;
+};
+
+const applyDamageToEntity = (
+  target,
+  amount = 1,
+  { createIfMissing = false, attacker = null } = {}
+) => {
+  const health = normalizeHealthComponent(target, { createIfMissing });
+  if (!health || health.invulnerable || health.dead) return false;
+
+  const parsedDamage = Number.parseFloat(amount);
+  const damage = Math.max(Number.isFinite(parsedDamage) ? parsedDamage : 0, 0);
+  health.currentHealth = Math.max(0, health.currentHealth - damage);
+  health.dead = health.currentHealth <= 0;
+  const entity = getComponentEntity(target, null);
+  if (entity) {
+    triggerSpriteHitReaction(entity);
+    applyHitPhysicsReaction(entity, attacker);
+  }
+  return true;
+};
+
+const healEntity = (target, amount = 1, { createIfMissing = false } = {}) => {
+  const health = normalizeHealthComponent(target, { createIfMissing });
+  if (!health) return false;
+
+  const parsedHeal = Number.parseFloat(amount);
+  const healAmount = Math.max(Number.isFinite(parsedHeal) ? parsedHeal : 0, 0);
+  health.currentHealth = Math.min(health.maxHealth, health.currentHealth + healAmount);
+  health.dead = health.currentHealth <= 0;
+  return true;
+};
+
+const updateHealthHud = () => {
+  const health = normalizeHealthComponent(playerEntity, { createIfMissing: false });
+  const max = Number.isFinite(health?.maxHealth) && health.maxHealth > 0 ? health.maxHealth : 0;
+  const current = Number.isFinite(health?.currentHealth) ? health.currentHealth : 0;
+  const ratio = max > 0 ? Math.min(Math.max(current / max, 0), 1) : 0;
+
+  if (runtimeHealthText) {
+    runtimeHealthText.textContent = max > 0 ? `${Math.round(current)} / ${Math.round(max)}` : "-- / --";
+  }
+  if (runtimeHealthFill) {
+    runtimeHealthFill.style.width = `${ratio * 100}%`;
+  }
+};
+
+const getSpriteHitReactionAnimationName = (sprite) => {
+  if (!sprite || !Array.isArray(sprite.animations) || !sprite.animations.length) return "";
+
+  const explicit = normalizeSpriteAnimationKey(sprite.hitReactionAnimation);
+  if (explicit) {
+    const explicitAnimation = sprite.animations.find(
+      (animation) => normalizeSpriteAnimationKey(animation.name) === explicit
+    );
+    if (explicitAnimation) {
+      return explicitAnimation.name;
+    }
+  }
+
+  const priority = ["hit", "hurt", "damaged", "damage", "react"];
+  const inferred = sprite.animations.find((animation) =>
+    priority.includes((animation.name ?? "").toLowerCase())
+  );
+  return inferred?.name ?? "";
+};
+
+const restoreSpriteAnimationAfterHit = (entity, sprite) => {
+  const state = spriteHitReactionState.get(entity.id);
+  if (!state || state.reactionAnimation !== sprite.activeAnimation) return false;
+
+  const previousAnimation = sprite.animations.find(
+    (animation) => animation.name === state.previousAnimation
+  );
+  if (!previousAnimation) {
+    spriteHitReactionState.delete(entity.id);
+    return false;
+  }
+
+  sprite.activeAnimation = previousAnimation.name;
+  sprite.activeFrameIndex = Math.min(
+    Number.isFinite(state.previousFrameIndex) ? state.previousFrameIndex : 0,
+    Math.max((previousAnimation.frames?.length ?? 1) - 1, 0)
+  );
+  sprite.playing = state.previousPlaying !== false;
+  spriteHitReactionState.delete(entity.id);
+  return true;
+};
+
+const triggerSpriteHitReaction = (entity) => {
+  const sprite = entity?.components.get(ComponentType.SpriteCharacter);
+  if (!sprite || !Array.isArray(sprite.animations) || !sprite.animations.length) return false;
+
+  const reactionAnimationName = getSpriteHitReactionAnimationName(sprite);
+  if (!reactionAnimationName) return false;
+
+  const reactionAnimation = sprite.animations.find(
+    (animation) => animation.name === reactionAnimationName
+  );
+  if (!reactionAnimation) return false;
+
+  const currentAnimationName = sprite.activeAnimation || sprite.defaultAnimation || "";
+  if (currentAnimationName === reactionAnimation.name) {
+    sprite.activeFrameIndex = 0;
+    sprite.playing = true;
+    return true;
+  }
+
+  spriteHitReactionState.set(entity.id, {
+    previousAnimation: currentAnimationName,
+    previousFrameIndex: Number.isFinite(sprite.activeFrameIndex) ? sprite.activeFrameIndex : 0,
+    previousPlaying: sprite.playing !== false,
+    reactionAnimation: reactionAnimation.name,
+  });
+
+  sprite.activeAnimation = reactionAnimation.name;
+  sprite.activeFrameIndex = 0;
+  sprite.playing = true;
+  return true;
+};
+
+const applyHitPhysicsReaction = (entity, attacker = null) => {
+  if (!entity) return false;
+
+  const sprite = entity.components.get(ComponentType.SpriteCharacter) ?? null;
+  const config = getHitReactionPhysicsConfig(sprite);
+  if (!config.enabled) return false;
+  if (sprite && config.skipWhenAnimation && getSpriteHitReactionAnimationName(sprite)) {
+    return false;
+  }
+
+  const collider = entity.components.get(ComponentType.Collider);
+  const transform = entity.components.get(ComponentType.Transform);
+  if (!collider || !transform) return false;
+
+  const targetCenter = getEntityWorldCenter(entity);
+  const attackerCenter = attacker ? getEntityWorldCenter(attacker) : null;
+  const away = attackerCenter
+    ? targetCenter.clone().sub(attackerCenter)
+    : new THREE.Vector3(
+        Math.sin(transform.rotation?.[1] ?? 0),
+        0,
+        Math.cos(transform.rotation?.[1] ?? 0)
+      );
+
+  if (away.lengthSq() === 0) {
+    away.set(0, 0, 1);
+  }
+  away.normalize();
+
+  const offset = config.offset;
+  const displacement = new THREE.Vector3(
+    away.x * offset[0],
+    offset[1],
+    away.z * offset[2]
+  );
+
+  if (collider.body === "dynamic") {
+    const applied = physics.applyImpulse(entity.id, {
+      x: displacement.x,
+      y: displacement.y,
+      z: displacement.z,
+    });
+    if (config.fallOver) {
+      physics.applyAngularImpulse(entity.id, {
+        x: -away.z * offset[2] * 1.6,
+        y: 0,
+        z: away.x * offset[0] * 1.6,
+      });
+    }
+    return applied;
+  }
+
+  transform.position[0] += displacement.x;
+  transform.position[1] += displacement.y;
+  transform.position[2] += displacement.z;
+
+  if (config.fallOver) {
+    transform.rotation[2] += away.x >= 0 ? 0.8 : -0.8;
+  }
+  return true;
 };
 
 const setTransformVector = (targetOrVector, maybeVector, key, defaultTarget = null) => {
@@ -172,6 +402,22 @@ const createScriptApi = (entity) => {
     },
     getTransform: (target = entity) => getTransformForEntity(resolveTarget(target)),
     getCollider: (target = entity) => getColliderForEntity(resolveTarget(target)),
+    getHealth: (target = entity) => getHealthForEntity(resolveTarget(target)),
+    setHealth: (targetOrValue, maybeValue) => {
+      const target = isEntityLike(targetOrValue) ? targetOrValue : entity;
+      const value = isEntityLike(targetOrValue) ? maybeValue : targetOrValue;
+      return setHealthValue(target, value, { createIfMissing: true });
+    },
+    damage: (targetOrAmount, maybeAmount) => {
+      const target = isEntityLike(targetOrAmount) ? targetOrAmount : entity;
+      const amount = isEntityLike(targetOrAmount) ? maybeAmount : targetOrAmount;
+      return applyDamageToEntity(target, amount, { createIfMissing: true });
+    },
+    heal: (targetOrAmount, maybeAmount) => {
+      const target = isEntityLike(targetOrAmount) ? targetOrAmount : entity;
+      const amount = isEntityLike(targetOrAmount) ? maybeAmount : targetOrAmount;
+      return healEntity(target, amount, { createIfMissing: true });
+    },
     setColliderBody: (targetOrBody, maybeBody) =>
       setColliderProperty(targetOrBody, maybeBody, "body"),
     setColliderTrigger: (targetOrTrigger, maybeTrigger) =>
@@ -266,6 +512,51 @@ const getColliderBounds = (entity) => {
   };
 };
 
+const getEntityWorldCenter = (entity) => {
+  if (!entity) return new THREE.Vector3();
+  const collider = entity.components.get(ComponentType.Collider);
+  const body = physics.getBody(entity.id);
+  const translation = body?.translation?.() ?? null;
+  const transform = entity.components.get(ComponentType.Transform);
+  const offset = collider ? clampVector3(collider.offset, [0, 0, 0]) : [0, 0, 0];
+
+  return new THREE.Vector3(
+    (translation?.x ?? transform?.position?.[0] ?? 0) + offset[0],
+    (translation?.y ?? transform?.position?.[1] ?? 0) + offset[1],
+    (translation?.z ?? transform?.position?.[2] ?? 0) + offset[2]
+  );
+};
+
+const getCombatBounds = (entity, componentType) => {
+  const box = entity.components.get(componentType);
+  if (!box) return null;
+  if (box.enabled === false) return null;
+
+  const size = clampVector3(box.size, [1, 1, 1]);
+  const offset = clampVector3(box.offset, [0, 0, 0]);
+  const body = physics.getBody(entity.id);
+  const translation = body?.translation?.() ?? null;
+  const transform = entity.components.get(ComponentType.Transform);
+  const center = new THREE.Vector3(
+    (translation?.x ?? transform?.position?.[0] ?? 0) + offset[0],
+    (translation?.y ?? transform?.position?.[1] ?? 0) + offset[1],
+    (translation?.z ?? transform?.position?.[2] ?? 0) + offset[2]
+  );
+  const halfExtents = new THREE.Vector3(size[0] * 0.5, size[1] * 0.5, size[2] * 0.5);
+
+  return {
+    min: center.clone().sub(halfExtents),
+    max: center.clone().add(halfExtents),
+  };
+};
+
+const getHitReactionPhysicsConfig = (sprite) => ({
+  enabled: sprite?.hitReactionPhysicsEnabled !== false,
+  offset: clampVector3(sprite?.hitReactionPhysicsOffset, [0.45, 0.18, 0.45]),
+  fallOver: Boolean(sprite?.hitReactionFallOver),
+  skipWhenAnimation: sprite?.hitReactionSkipPhysicsWhenAnimation !== false,
+});
+
 const boxesOverlap = (a, b) =>
   a.min.x <= b.max.x &&
   a.max.x >= b.min.x &&
@@ -338,6 +629,51 @@ const processTriggerEvents = () => {
   triggerPairs = currentPairs;
 };
 
+const processCombatEvents = () => {
+  const attackers = world
+    .getEntities()
+    .filter((entity) => {
+      const hitBox = entity.components.get(ComponentType.HitBox);
+      return Boolean(hitBox && hitBox.enabled !== false);
+    });
+  const targets = world
+    .getEntities()
+    .filter((entity) => {
+      const health = entity.components.get(ComponentType.Health);
+      const collider = entity.components.get(ComponentType.Collider);
+      return Boolean(health && collider);
+    });
+  const currentPairs = new Map();
+
+  attackers.forEach((attacker) => {
+    const hitBox = attacker.components.get(ComponentType.HitBox);
+    const attackerBounds = getCombatBounds(attacker, ComponentType.HitBox);
+    if (!hitBox || !attackerBounds) return;
+
+    const damageValue = Number.parseFloat(hitBox.damage);
+    const damage = Number.isFinite(damageValue) && damageValue > 0 ? damageValue : 0;
+    if (damage <= 0) return;
+
+    targets.forEach((target) => {
+      if (target.id === attacker.id) return;
+      const targetBounds = getCombatBounds(target, ComponentType.Collider);
+      if (!targetBounds) return;
+      if (!boxesOverlap(attackerBounds, targetBounds)) return;
+
+      const key = pairKeyFor(attacker, target);
+      currentPairs.set(key, { attacker, target });
+      if (!combatPairs.has(key)) {
+        applyDamageToEntity(target, damage, {
+          createIfMissing: false,
+          attacker,
+        });
+      }
+    });
+  });
+
+  combatPairs = currentPairs;
+};
+
 const ensureSpriteDefaults = () => {
   world.getEntities().forEach((entity) => {
     const sprite = entity.components.get(ComponentType.SpriteCharacter);
@@ -384,12 +720,37 @@ const spriteState = new Map();
 
 const spriteAnimationSignature = (sprite) =>
   Array.isArray(sprite?.animations)
-    ? sprite.animations
+  ? sprite.animations
         .map((animation) =>
           [
             animation?.name ?? "",
             animation?.fps ?? 0,
             animation?.loop === false ? 0 : 1,
+            animation?.hitBox
+              ? `hit:${[
+                  animation.hitBox.x ?? 0,
+                  animation.hitBox.y ?? 0,
+                  animation.hitBox.width ?? 0,
+                  animation.hitBox.height ?? 0,
+                  animation.hitBox.depth ?? 0,
+                  animation.hitBox.damage ?? 0,
+                ].join(",")}`
+              : "hit:none",
+            `react:${normalizeSpriteAnimationKey(sprite?.hitReactionAnimation)}`,
+            `knock:${[
+              Number.isFinite(sprite?.hitReactionPhysicsOffset?.[0])
+                ? sprite.hitReactionPhysicsOffset[0]
+                : 0,
+              Number.isFinite(sprite?.hitReactionPhysicsOffset?.[1])
+                ? sprite.hitReactionPhysicsOffset[1]
+                : 0,
+              Number.isFinite(sprite?.hitReactionPhysicsOffset?.[2])
+                ? sprite.hitReactionPhysicsOffset[2]
+                : 0,
+            ].join(",")}`,
+            `fall:${sprite?.hitReactionFallOver ? 1 : 0}`,
+            `phys:${sprite?.hitReactionPhysicsEnabled === false ? 0 : 1}`,
+            `skip:${sprite?.hitReactionSkipPhysicsWhenAnimation === false ? 0 : 1}`,
             Array.isArray(animation?.frames)
               ? animation.frames
                   .map((frame) => frame?.source ?? frame?.relativePath ?? frame?.name ?? "")
@@ -404,6 +765,7 @@ const ensureSpriteState = (entity, sprite) => {
   const signature = spriteAnimationSignature(sprite);
   let state = spriteState.get(entity.id);
   if (!state || state.signature !== signature) {
+    spriteHitReactionState.delete(entity.id);
     state = {
       signature,
       animator: new SpriteAnimator({
@@ -465,6 +827,16 @@ const updateSpriteRuntime = (dt) => {
         ];
       }
     }
+
+    syncSpriteCombatBoxComponent(
+      entity,
+      ComponentType.HitBox,
+      resolveSpriteCombatBoxForAnimation(activeAnimation, "hitBox"),
+      activeAnimation.name
+    );
+    if (animator.finished) {
+      restoreSpriteAnimationAfterHit(entity, sprite);
+    }
   });
 
   Array.from(spriteState.keys()).forEach((entityId) => {
@@ -472,6 +844,67 @@ const updateSpriteRuntime = (dt) => {
       spriteState.delete(entityId);
     }
   });
+};
+
+const syncSpriteCombatBoxComponent = (entity, componentType, box, animationName) => {
+  const existing = entity.components.get(componentType);
+  if (componentType !== ComponentType.HitBox) return existing ?? null;
+
+  if (box) {
+    const nextComponent = existing ?? createHitBox({ sourceAnimation: animationName });
+    if (!existing) {
+      world.addComponent(entity, nextComponent);
+    }
+
+    nextComponent.enabled = true;
+    nextComponent.sourceAnimation = animationName ?? null;
+    nextComponent.size = [
+      Number.isFinite(box.width) && box.width > 0 ? box.width : nextComponent.size?.[0] ?? 1,
+      Number.isFinite(box.height) && box.height > 0 ? box.height : nextComponent.size?.[1] ?? 1,
+      Number.isFinite(box.depth) && box.depth > 0 ? box.depth : nextComponent.size?.[2] ?? 0.2,
+    ];
+    nextComponent.offset = [
+      Number.isFinite(box.x) ? box.x : nextComponent.offset?.[0] ?? 0,
+      Number.isFinite(box.y) ? box.y : nextComponent.offset?.[1] ?? 0,
+      nextComponent.offset?.[2] ?? 0,
+    ];
+    const damage = Number.parseFloat(box.damage);
+    nextComponent.damage = Number.isFinite(damage) && damage >= 0 ? damage : 10;
+    return nextComponent;
+  }
+
+  if (existing && existing.sourceAnimation) {
+    existing.enabled = false;
+  }
+  return existing ?? null;
+};
+
+const updateHealthState = (dt) => {
+  world.getEntities().forEach((entity) => {
+    const health = entity.components.get(ComponentType.Health);
+    if (!health) return;
+
+    if (!Number.isFinite(health.maxHealth) || health.maxHealth <= 0) {
+      health.maxHealth = 100;
+    }
+    if (!Number.isFinite(health.currentHealth)) {
+      health.currentHealth = health.maxHealth;
+    }
+    health.currentHealth = Math.min(Math.max(health.currentHealth, 0), health.maxHealth);
+    health.regenRate = Number.isFinite(health.regenRate) ? health.regenRate : 0;
+    health.invulnerable = Boolean(health.invulnerable);
+
+    if (!health.dead && health.regenRate > 0 && health.currentHealth < health.maxHealth) {
+      health.currentHealth = Math.min(
+        health.maxHealth,
+        health.currentHealth + health.regenRate * Math.max(dt, 0)
+      );
+    }
+
+    health.dead = health.currentHealth <= 0;
+  });
+
+  updateHealthHud();
 };
 
 const findPlayerEntity = () => {
@@ -698,6 +1131,7 @@ const resetMovementState = (transform) => {
 const preparePlayer = () => {
   playerEntity = findPlayerEntity();
   if (!playerEntity) {
+    updateHealthHud();
     movementState.jumpPrimed = false;
     return;
   }
@@ -707,8 +1141,10 @@ const preparePlayer = () => {
     collider.body = "dynamic";
   }
 
+  normalizeHealthComponent(playerEntity, { createIfMissing: true });
   const transform = playerEntity.components.get(ComponentType.Transform);
   resetMovementState(transform);
+  updateHealthHud();
 };
 
 const prepareCamera = () => {
@@ -906,6 +1342,7 @@ const loadSceneFromStorage = ({ announce = true } = {}) => {
     activeCameraEntity = null;
     selectedCameraEntityId = null;
     activeCameraOrbitSignature = null;
+    combatPairs.clear();
     refreshCameraPicker();
     if (announce) {
       setRuntimeStatus("No saved scene found.");
@@ -921,9 +1358,12 @@ const loadSceneFromStorage = ({ announce = true } = {}) => {
     engine.setWorld(loaded);
     buildScriptRunners();
     triggerPairs.clear();
+    combatPairs.clear();
+    spriteHitReactionState.clear();
     preparePlayer();
     prepareCamera();
     ensureSpriteDefaults();
+    updateHealthHud();
     setRuntimeSceneLabel("Loaded scene");
     if (activeCameraEntity) {
       setRuntimeSceneLabel(`Loaded scene - ${activeCameraEntity.name || "Camera"}`);
@@ -937,7 +1377,10 @@ const loadSceneFromStorage = ({ announce = true } = {}) => {
     activeCameraEntity = null;
     selectedCameraEntityId = null;
     activeCameraOrbitSignature = null;
+    combatPairs.clear();
+    spriteHitReactionState.clear();
     refreshCameraPicker();
+    updateHealthHud();
     if (announce) {
       setRuntimeStatus("Failed to load saved scene.");
     }
@@ -1154,6 +1597,12 @@ engine.addSystem((delta) => {
 });
 engine.addSystem(() => {
   processTriggerEvents();
+});
+engine.addSystem(() => {
+  processCombatEvents();
+});
+engine.addSystem((delta) => {
+  updateHealthState(delta);
 });
 engine.addSystem(() => {
   applyCamera();

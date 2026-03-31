@@ -6,8 +6,8 @@ export const ComponentType = Object.freeze({
   Transform: "transform",
   Mesh: "mesh",
   Collider: "collider",
+  Health: "health",
   HitBox: "hitBox",
-  HurtBox: "hurtBox",
   Player: "player",
   Script: "script",
   Camera: "camera",
@@ -42,16 +42,35 @@ export const createCollider = (overrides = {}) => ({
   body: overrides.body ?? "static",
 });
 
+export const createHealth = (overrides = {}) => {
+  const maxHealth =
+    Number.isFinite(overrides.maxHealth) && overrides.maxHealth > 0
+      ? overrides.maxHealth
+      : 100;
+  const currentHealth =
+    Number.isFinite(overrides.currentHealth)
+      ? Math.min(Math.max(overrides.currentHealth, 0), maxHealth)
+      : maxHealth;
+
+  return {
+    type: ComponentType.Health,
+    maxHealth,
+    currentHealth,
+    regenRate: Number.isFinite(overrides.regenRate) ? overrides.regenRate : 0,
+    invulnerable: Boolean(overrides.invulnerable),
+    dead: Boolean(overrides.dead) || currentHealth <= 0,
+  };
+};
+
 export const createHitBox = (overrides = {}) => ({
   type: ComponentType.HitBox,
   size: overrides.size ?? [1, 1, 1],
   offset: overrides.offset ?? [0, 0, 0],
-});
-
-export const createHurtBox = (overrides = {}) => ({
-  type: ComponentType.HurtBox,
-  size: overrides.size ?? [1, 1, 1],
-  offset: overrides.offset ?? [0, 0, 0],
+  damage: Number.isFinite(Number.parseFloat(overrides.damage))
+    ? Number.parseFloat(overrides.damage)
+    : 10,
+  enabled: overrides.enabled !== false,
+  sourceAnimation: overrides.sourceAnimation ?? null,
 });
 
 export const createPlayer = (overrides = {}) => ({

@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/GLTFLoader.js";
-import { ComponentType } from "./components.js";
+import { ComponentType, createHitBox } from "./components.js";
 import {
   SpriteAnimator,
   getSpriteFrameSize,
+  normalizeSpriteKey as normalizeSpriteAnimationKey,
+  resolveSpriteCombatBoxForAnimation,
 } from "./sprite-animation.js";
 
 const geometryFactory = {
@@ -120,6 +122,39 @@ export const syncWorldToScene = (
     return [Math.max(width, 0.01), Math.max(height, 0.01)];
   };
 
+  const syncSpriteCombatBoxComponent = (entity, componentType, box, animationName) => {
+    const existing = entity.components.get(componentType);
+    if (componentType !== ComponentType.HitBox) return existing ?? null;
+
+    if (box) {
+      const nextComponent = existing ?? createHitBox({ sourceAnimation: animationName });
+      if (!existing) {
+        world.addComponent(entity, nextComponent);
+      }
+
+      nextComponent.enabled = true;
+      nextComponent.sourceAnimation = animationName ?? null;
+      nextComponent.size = [
+        Number.isFinite(box.width) && box.width > 0 ? box.width : nextComponent.size?.[0] ?? 1,
+        Number.isFinite(box.height) && box.height > 0 ? box.height : nextComponent.size?.[1] ?? 1,
+        Number.isFinite(box.depth) && box.depth > 0 ? box.depth : nextComponent.size?.[2] ?? 0.2,
+      ];
+      nextComponent.offset = [
+        Number.isFinite(box.x) ? box.x : nextComponent.offset?.[0] ?? 0,
+        Number.isFinite(box.y) ? box.y : nextComponent.offset?.[1] ?? 0,
+        nextComponent.offset?.[2] ?? 0,
+      ];
+      const damage = Number.parseFloat(box.damage);
+      nextComponent.damage = Number.isFinite(damage) && damage >= 0 ? damage : 10;
+      return nextComponent;
+    }
+
+    if (existing && existing.sourceAnimation) {
+      existing.enabled = false;
+    }
+    return existing ?? null;
+  };
+
   const spriteAnimationSignature = (sprite) =>
     Array.isArray(sprite?.animations)
       ? sprite.animations
@@ -128,6 +163,31 @@ export const syncWorldToScene = (
               animation?.name ?? "",
               animation?.fps ?? 0,
               animation?.loop === false ? 0 : 1,
+              animation?.hitBox
+                ? `hit:${[
+                    animation.hitBox.x ?? 0,
+                    animation.hitBox.y ?? 0,
+                    animation.hitBox.width ?? 0,
+                    animation.hitBox.height ?? 0,
+                    animation.hitBox.depth ?? 0,
+                    animation.hitBox.damage ?? 0,
+                  ].join(",")}`
+                : "hit:none",
+              `react:${normalizeSpriteAnimationKey(sprite?.hitReactionAnimation)}`,
+              `knock:${[
+                Number.isFinite(sprite?.hitReactionPhysicsOffset?.[0])
+                  ? sprite.hitReactionPhysicsOffset[0]
+                  : 0,
+                Number.isFinite(sprite?.hitReactionPhysicsOffset?.[1])
+                  ? sprite.hitReactionPhysicsOffset[1]
+                  : 0,
+                Number.isFinite(sprite?.hitReactionPhysicsOffset?.[2])
+                  ? sprite.hitReactionPhysicsOffset[2]
+                  : 0,
+              ].join(",")}`,
+              `fall:${sprite?.hitReactionFallOver ? 1 : 0}`,
+              `phys:${sprite?.hitReactionPhysicsEnabled === false ? 0 : 1}`,
+              `skip:${sprite?.hitReactionSkipPhysicsWhenAnimation === false ? 0 : 1}`,
               Array.isArray(animation?.frames)
                 ? animation.frames
                     .map((frame) => frame?.source ?? frame?.relativePath ?? frame?.name ?? "")
@@ -346,6 +406,12 @@ export const syncWorldToScene = (
     const frameTexture = resolvedTexture;
     const frameIndex = animator.currentFrameIndex;
     sprite.activeFrameIndex = frameIndex;
+    syncSpriteCombatBoxComponent(
+      entity,
+      ComponentType.HitBox,
+      resolveSpriteCombatBoxForAnimation(animation, "hitBox"),
+      animation.name
+    );
     const [width, height] = frameTexture
       ? getSpriteFrameSize(frameTexture, normalizeDisplaySize(sprite.displaySize))
       : normalizeDisplaySize(sprite.displaySize);

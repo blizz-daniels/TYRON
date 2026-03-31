@@ -253,6 +253,46 @@
         font-size: 0.92rem;
       }
 
+      .runtime__hud-left {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: min(100%, 340px);
+      }
+
+      .runtime__health {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .runtime__health-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .runtime__health-track {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .runtime__health-fill {
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        box-shadow: 0 0 16px rgba(85, 228, 218, 0.35);
+        transition: width 120ms ease;
+      }
+
       .runtime__hud span,
       .runtime__legend {
         color: var(--muted);
@@ -369,8 +409,17 @@
         <section class="runtime-stage">
           <canvas id="runtime" tabindex="0" aria-label="Tyron runtime viewport"></canvas>
           <div class="runtime__hud">
-            <div>
+            <div class="runtime__hud-left">
               <strong id="runtimeSceneLabel" aria-live="polite">Default sandbox world</strong>
+              <div class="runtime__health">
+                <div class="runtime__health-row">
+                  <span>Health</span>
+                  <span id="runtimeHealthText" aria-live="polite">100 / 100</span>
+                </div>
+                <div class="runtime__health-track" aria-hidden="true">
+                  <div class="runtime__health-fill" id="runtimeHealthFill"></div>
+                </div>
+              </div>
               <span>WASD or arrows move, Space jumps, IJKL orbit the camera, tap the D-pad on mobile.</span>
             </div>
             <div class="runtime__legend">

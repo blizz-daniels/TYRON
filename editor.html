@@ -19,10 +19,6 @@
         <div class="toolbar">
           <button class="btn" id="playBtn">Play</button>
           <button class="btn btn--ghost" id="stopBtn">Stop</button>
-          <div class="divider"></div>
-          <button class="btn btn--ghost" data-gizmo="translate">Move</button>
-          <button class="btn btn--ghost" data-gizmo="rotate">Rotate</button>
-          <button class="btn btn--ghost" data-gizmo="scale">Scale</button>
         </div>
         <div class="toolbar">
           <button class="btn btn--ghost" id="saveScene">Save</button>
@@ -32,108 +28,144 @@
         </div>
       </header>
 
-      <section class="workspace-banner" aria-labelledby="workspaceTitle">
-        <div class="workspace-banner__copy">
-          <p class="eyebrow">Workspace map</p>
-          <h1 id="workspaceTitle">Keep the scene graph, inspector, assets, and code in one readable flow.</h1>
-          <p>
-            Use the jump links to move through the editor in a predictable order and stay
-            oriented while you build.
-          </p>
-        </div>
-        <nav class="workspace-banner__nav" aria-label="Editor sections">
-          <a href="#hierarchy">Hierarchy</a>
-          <a href="#viewportPanel">Viewport</a>
-          <a href="#inspector">Inspector</a>
-          <a href="#assets">Assets</a>
-          <a href="#codePanel">Code</a>
-        </nav>
-      </section>
-
-      <aside class="panel panel--left" id="hierarchy">
-        <div class="panel__header">
-          <h2>Hierarchy</h2>
-          <button class="btn btn--ghost btn--small" id="addEntity">Add</button>
-          <button class="btn btn--ghost btn--small" id="addCameraEntity">Camera</button>
-        </div>
-        <ul class="list" id="hierarchyList"></ul>
-      </aside>
-
       <section class="viewport" id="viewportPanel">
         <canvas id="viewport"></canvas>
         <div class="viewport__hud">
           <span id="viewportStatus">Editor ready</span>
         </div>
-      </section>
-
-      <aside class="panel panel--right" id="inspector">
-        <h2>Inspector</h2>
-        <div class="inspector" id="inspectorFields">
-          <p class="muted">Select an entity to edit its components.</p>
-        </div>
-      </aside>
-
-      <section class="panel panel--bottom" id="assets">
-        <div class="panel__header">
-          <h2>Asset Browser</h2>
-          <div class="toolbar">
-            <button class="btn btn--ghost btn--small" id="importFolderBtn">Import World</button>
-            <button class="btn btn--ghost btn--small" id="importSpriteFolderBtn">Import Sprite Folders</button>
-            <div class="pill">Drag into viewport (next)</div>
-          </div>
-        </div>
-        <input
-          type="file"
-          id="importFolder"
-          multiple
-          accept=".glb"
-          hidden
-        />
-        <input
-          type="file"
-          id="importSpriteFolder"
-          multiple
-          accept=".png,.json"
-          webkitdirectory
-          directory
-          hidden
-        />
-        <div class="asset-section">
-          <div class="asset-section__header">
-            <h3>Uploaded</h3>
-            <span class="hint">Select a file to add it to the scene</span>
-          </div>
-          <ul class="uploaded-list" id="uploadedList"></ul>
-        </div>
-        <div class="asset-section">
-          <div class="asset-section__header">
-            <h3>Sprite Characters</h3>
-            <span class="hint">Use /assets/&lt;character&gt;/&lt;animation&gt;/frame_001.png and animationName.json</span>
-          </div>
-          <div class="sprite-browser" id="spriteBrowser"></div>
-        </div>
-        <div class="asset-section">
-          <h3>Worlds</h3>
-          <div class="asset-grid" id="worldGrid"></div>
-        </div>
-        <div class="asset-section">
-          <h3>Assets</h3>
-          <div class="asset-grid" id="assetGrid"></div>
+        <div class="viewport__gizmos" aria-label="Transform tools">
+          <button class="btn btn--ghost btn--small active" type="button" data-gizmo="translate">Move</button>
+          <button class="btn btn--ghost btn--small" type="button" data-gizmo="rotate">Rotate</button>
+          <button class="btn btn--ghost btn--small" type="button" data-gizmo="scale">Scale</button>
         </div>
       </section>
 
-      <section class="panel panel--code" id="codePanel">
-        <div class="panel__header">
-          <h2>Code</h2>
-          <div class="pill">Monaco embedded</div>
+      <section class="panel panel--editcard" id="editCard">
+        <div class="editcard__tabs" role="tablist" aria-label="Editor tabs">
+          <button class="editcard__tab active" type="button" data-edit-tab="offset">Offset</button>
+          <button class="editcard__tab" type="button" data-edit-tab="hierarchy">Hierarchy</button>
+          <button class="editcard__tab" type="button" data-edit-tab="collider">Collider</button>
+          <button class="editcard__tab" type="button" data-edit-tab="player">Player</button>
+          <button class="editcard__tab" type="button" data-edit-tab="sprite">Sprite</button>
+          <button class="editcard__tab" type="button" data-edit-tab="assets">Assets</button>
+          <button class="editcard__tab" type="button" data-edit-tab="code">Code</button>
         </div>
-        <div id="codeEditor" class="code-editor"></div>
-        <div class="code-presets">
-          <div class="code-presets__header">
-            <h3>Trigger Presets</h3>
-            <span class="hint" id="triggerPresetHint">Select a trigger collider to unlock presets.</span>
-          </div>
-          <div class="preset-grid" id="triggerPresetButtons"></div>
+        <div class="editcard__panels">
+          <section class="editcard__panel active" data-edit-panel="offset">
+            <div class="panel__header">
+              <h2>Offset</h2>
+              <div class="pill">Transform and general entity settings</div>
+            </div>
+            <div class="inspector" id="inspectorFields">
+              <p class="muted">Select an entity to edit its components.</p>
+            </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="hierarchy">
+            <div class="panel__header">
+              <h2>Hierarchy</h2>
+              <div class="pill">Scene graph</div>
+            </div>
+            <div class="panel__header panel__header--tight">
+              <button class="btn btn--ghost btn--small" id="addEntity">Add</button>
+              <button class="btn btn--ghost btn--small" id="addCameraEntity">Camera</button>
+            </div>
+            <ul class="list" id="hierarchyList"></ul>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="collider">
+            <div class="panel__header">
+              <h2>Collider</h2>
+              <div class="pill">Collision and combat</div>
+            </div>
+            <div class="inspector" id="colliderFields">
+              <p class="muted">Select an entity with a collider or hit box.</p>
+            </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="player">
+            <div class="panel__header">
+              <h2>Player</h2>
+              <div class="pill">Control and health</div>
+            </div>
+            <div class="inspector" id="playerFields">
+              <p class="muted">Select an entity with player or health components.</p>
+            </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="sprite">
+            <div class="panel__header">
+              <h2>Sprite</h2>
+              <div class="toolbar">
+                <button class="btn btn--ghost btn--small" id="importSpriteFolderBtn">Import Sprite Folders</button>
+                <div class="pill">PNG sequences only</div>
+              </div>
+            </div>
+            <div class="sprite-tab__inspector" id="spriteInspectorFields"></div>
+            <input
+              type="file"
+              id="importSpriteFolder"
+              multiple
+              accept=".png,.json"
+              webkitdirectory
+              directory
+              hidden
+            />
+            <div class="asset-section">
+              <div class="asset-section__header">
+                <h3>Sprite Characters</h3>
+                <span class="hint">Use /assets/&lt;character&gt;/&lt;animation&gt;/frame_001.png and animationName.json</span>
+              </div>
+              <div class="sprite-browser" id="spriteBrowser"></div>
+            </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="assets">
+            <div class="panel__header">
+              <h2>Assets</h2>
+              <div class="toolbar">
+                <button class="btn btn--ghost btn--small" id="importFolderBtn">Import World</button>
+                <div class="pill">Drag into viewport (next)</div>
+              </div>
+            </div>
+            <input
+              type="file"
+              id="importFolder"
+              multiple
+              accept=".glb"
+              hidden
+            />
+            <div class="asset-section">
+              <div class="asset-section__header">
+                <h3>Uploaded</h3>
+                <span class="hint">Select a file to add it to the scene</span>
+              </div>
+              <ul class="uploaded-list" id="uploadedList"></ul>
+            </div>
+            <div class="asset-section">
+              <h3>Worlds</h3>
+              <div class="asset-grid" id="worldGrid"></div>
+            </div>
+            <div class="asset-section">
+              <h3>Assets</h3>
+              <div class="asset-grid" id="assetGrid"></div>
+            </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="code">
+            <div class="panel__header">
+              <h2>Code</h2>
+              <div class="pill">Monaco embedded</div>
+            </div>
+            <div id="codeEditor" class="code-editor"></div>
+            <div class="code-presets">
+              <div class="code-presets__header">
+                <h3>Trigger Presets</h3>
+                <span class="hint" id="triggerPresetHint">Select a trigger collider to unlock presets.</span>
+              </div>
+              <div class="preset-grid" id="triggerPresetButtons"></div>
+            </div>
+          </section>
         </div>
       </section>
     </div>

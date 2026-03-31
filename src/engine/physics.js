@@ -108,6 +108,29 @@ export class PhysicsSystem {
     return true;
   }
 
+  applyAngularImpulse(entityId, impulse) {
+    const body = this.bodies.get(entityId);
+    if (!body) return false;
+
+    const vector = {
+      x: Number.isFinite(impulse?.x) ? impulse.x : Array.isArray(impulse) ? impulse[0] ?? 0 : 0,
+      y: Number.isFinite(impulse?.y) ? impulse.y : Array.isArray(impulse) ? impulse[1] ?? 0 : 0,
+      z: Number.isFinite(impulse?.z) ? impulse.z : Array.isArray(impulse) ? impulse[2] ?? 0 : 0,
+    };
+
+    if (typeof body.applyTorqueImpulse === "function") {
+      body.applyTorqueImpulse(vector, true);
+      return true;
+    }
+
+    if (typeof body.setAngvel === "function") {
+      body.setAngvel(vector, true);
+      return true;
+    }
+
+    return false;
+  }
+
   getBody(entityId) {
     return this.bodies.get(entityId) ?? null;
   }
