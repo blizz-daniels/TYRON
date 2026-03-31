@@ -21,8 +21,10 @@
           <button class="btn btn--ghost" id="stopBtn">Stop</button>
         </div>
         <div class="toolbar">
-          <button class="btn btn--ghost" id="saveScene">Save</button>
-          <button class="btn btn--ghost" id="loadScene">Load</button>
+          <button class="btn btn--ghost" id="saveScene">Save Draft</button>
+          <button class="btn btn--ghost" id="loadScene">Load Draft</button>
+          <button class="btn btn--ghost" id="publishProject">Publish</button>
+          <button class="btn btn--ghost" id="openPlayer">Open Player</button>
           <button class="btn btn--ghost" id="undoScene" type="button">Undo</button>
           <button class="btn btn--ghost" id="redoScene" type="button">Redo</button>
         </div>
@@ -47,6 +49,9 @@
           <button class="editcard__tab" type="button" data-edit-tab="collider">Collider</button>
           <button class="editcard__tab" type="button" data-edit-tab="player">Player</button>
           <button class="editcard__tab" type="button" data-edit-tab="sprite">Sprite</button>
+          <button class="editcard__tab" type="button" data-edit-tab="levels">Levels</button>
+          <button class="editcard__tab" type="button" data-edit-tab="hud">HUD</button>
+          <button class="editcard__tab" type="button" data-edit-tab="publish">Publish</button>
           <button class="editcard__tab" type="button" data-edit-tab="assets">Assets</button>
           <button class="editcard__tab" type="button" data-edit-tab="code">Code</button>
         </div>
@@ -118,6 +123,36 @@
               </div>
               <div class="sprite-browser" id="spriteBrowser"></div>
             </div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="levels">
+            <div class="panel__header">
+              <h2>Levels</h2>
+              <div class="pill">Scene order and progression</div>
+            </div>
+            <div class="panel__header panel__header--tight">
+              <button class="btn btn--ghost btn--small" id="addSceneButton" type="button">New Scene</button>
+              <button class="btn btn--ghost btn--small" id="duplicateSceneButton" type="button">Duplicate Scene</button>
+              <button class="btn btn--ghost btn--small" id="addLevelButton" type="button">New Level</button>
+            </div>
+            <div class="project-manager" id="sceneManager"></div>
+            <div class="project-manager" id="levelManager"></div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="hud">
+            <div class="panel__header">
+              <h2>HUD</h2>
+              <div class="pill">Player-facing UI</div>
+            </div>
+            <div class="project-manager" id="hudSettings"></div>
+          </section>
+
+          <section class="editcard__panel" data-edit-panel="publish">
+            <div class="panel__header">
+              <h2>Publish</h2>
+              <div class="pill">Draft and client build</div>
+            </div>
+            <div class="project-manager" id="publishPanel"></div>
           </section>
 
           <section class="editcard__panel" data-edit-panel="assets">

@@ -17,17 +17,68 @@ import {
   resolveSpriteCombatBoxForAnimation,
 } from "../engine/sprite-animation.js";
 import { deserializeScene, serializeScene } from "../engine/scene-io.js";
+import {
+  PROJECT_STORAGE_KEYS,
+  getActiveScene,
+  getLevelById,
+  getSceneById,
+  getStartingLevel,
+  loadLegacySceneLike,
+  loadProjectLike,
+  normalizeProject,
+} from "../engine/project-io.js";
 import { PhysicsSystem } from "../engine/physics.js";
 
 const canvas = document.getElementById("runtime");
 const runtimeStatus = document.getElementById("runtimeStatus");
 const runtimeSceneLabel = document.getElementById("runtimeSceneLabel");
+const runtimeSceneBanner = document.getElementById("runtimeSceneBanner");
+const runtimeObjectiveText = document.getElementById("runtimeObjectiveText");
+const runtimeMinimap = document.getElementById("runtimeMinimap");
+const runtimePauseOverlay = document.getElementById("runtimePauseOverlay");
+const runtimePauseTitle = document.getElementById("runtimePauseTitle");
+const runtimePauseDescription = document.getElementById("runtimePauseDescription");
+const runtimeResumeButton = document.getElementById("runtimeResumeButton");
+const runtimeRestartButton = document.getElementById("runtimeRestartButton");
+const runtimeStartScreen = document.getElementById("runtimeStartScreen");
+const runtimeStartButton = document.getElementById("runtimeStartButton");
+const runtimeContinueButton = document.getElementById("runtimeContinueButton");
+const runtimeMenuBurgerButton = document.getElementById("runtimeMenuBurgerButton");
+const runtimeMenuTray = document.getElementById("runtimeMenuTray");
+const runtimeMenuHomeButton = document.getElementById("runtimeMenuHomeButton");
+const runtimeMenuSettingsButton = document.getElementById("runtimeMenuSettingsButton");
+const runtimeMenuCommandsButton = document.getElementById("runtimeMenuCommandsButton");
+const runtimeSettingsBackButton = document.getElementById("runtimeSettingsBackButton");
+const runtimeCommandsBackButton = document.getElementById("runtimeCommandsBackButton");
+const runtimeMenuShell = document.getElementById("runtimeMenuShell");
+const runtimeHomePanel = document.getElementById("runtimeHomePanel");
+const runtimeMenuTitle = document.getElementById("runtimeMenuTitle");
+const runtimeMenuLead = document.getElementById("runtimeMenuLead");
+const runtimeMenuSessionText = document.getElementById("runtimeMenuSessionText");
+const runtimeSettingsPanel = document.getElementById("runtimeSettingsPanel");
+const runtimeCommandsPanel = document.getElementById("runtimeCommandsPanel");
+const runtimeCameraSpeed = document.getElementById("runtimeCameraSpeed");
+const runtimeSubtitlesToggle = document.getElementById("runtimeSubtitlesToggle");
+const runtimeTouchToggle = document.getElementById("runtimeTouchToggle");
 const runtimeHealthText = document.getElementById("runtimeHealthText");
 const runtimeHealthFill = document.getElementById("runtimeHealthFill");
 const loadButton = document.getElementById("loadScene");
 const cameraSelect = document.getElementById("cameraSelect");
 const controls = document.querySelector(".controls");
+const devTools = document.querySelector(".runtime__devtools");
+const runtimeMode = new URL(window.location.href).searchParams.get("mode") === "preview"
+  ? "preview"
+  : "client";
+const runtimeEntryMode = new URL(window.location.href).searchParams.get("entry") === "continue"
+  ? "continue"
+  : "start";
 const CAMERA_SELECTION_STORAGE_KEY = "tyronRuntimeCameraId";
+const DRAFT_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.draft;
+const PUBLISHED_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.published;
+const PLAYER_PROGRESS_STORAGE_KEY = "tyronPlayerProgress";
+const PLAYER_PREFERENCES_STORAGE_KEY = "tyronPlayerPreferences";
+
+document.body.dataset.runtimeMode = runtimeMode;
 
 if (canvas) {
   canvas.tabIndex = 0;
@@ -43,6 +94,330 @@ const setRuntimeStatus = (message) => {
 const setRuntimeSceneLabel = (message) => {
   if (runtimeSceneLabel) {
     runtimeSceneLabel.textContent = message;
+  }
+};
+
+const syncMenuState = () => {
+  if (runtimeStartScreen) {
+    runtimeStartScreen.classList.toggle("runtime__menu-hidden", !runtimeSessionState.menuVisible);
+    runtimeStartScreen.setAttribute("aria-hidden", runtimeSessionState.menuVisible ? "false" : "true");
+  }
+  if (runtimeMenuShell) {
+    runtimeMenuShell.dataset.view = runtimeSessionState.menuVisible ? runtimeSessionState.menuView : "home";
+  }
+  const isHome = runtimeSessionState.menuVisible && runtimeSessionState.menuView === "home";
+  const isSettings = runtimeSessionState.menuVisible && runtimeSessionState.menuView === "settings";
+  const isCommands = runtimeSessionState.menuVisible && runtimeSessionState.menuView === "commands";
+  const showTray = runtimeSessionState.menuBarOpen;
+  if (runtimeMenuTray) {
+    runtimeMenuTray.classList.toggle("runtime__menu-hidden", !showTray);
+    runtimeMenuTray.setAttribute("aria-hidden", showTray ? "false" : "true");
+  }
+  if (runtimeMenuBurgerButton) {
+    runtimeMenuBurgerButton.setAttribute("aria-expanded", showTray ? "true" : "false");
+  }
+  if (runtimeHomePanel) {
+    runtimeHomePanel.classList.toggle("runtime__menu-hidden", !isHome);
+    runtimeHomePanel.setAttribute("aria-hidden", isHome ? "false" : "true");
+  }
+  if (runtimeSettingsPanel) {
+    runtimeSettingsPanel.classList.toggle("runtime__menu-hidden", !isSettings);
+    runtimeSettingsPanel.setAttribute("aria-hidden", isSettings ? "false" : "true");
+  }
+  if (runtimeCommandsPanel) {
+    runtimeCommandsPanel.classList.toggle("runtime__menu-hidden", !isCommands);
+    runtimeCommandsPanel.setAttribute("aria-hidden", isCommands ? "false" : "true");
+  }
+};
+
+const setMenuView = (view = "home") => {
+  runtimeSessionState.menuView = view;
+  syncMenuState();
+  updateMenuCopy();
+};
+
+const toggleMenuTray = () => {
+  runtimeSessionState.menuBarOpen = !runtimeSessionState.menuBarOpen;
+  syncMenuState();
+};
+
+const loadPlayerPreferences = () => {
+  try {
+    const raw = localStorage.getItem(PLAYER_PREFERENCES_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Number.isFinite(parsed.cameraSpeed)) {
+      runtimePreferences.cameraSpeed = Math.min(Math.max(parsed.cameraSpeed, 0.5), 2.5);
+    }
+    if (typeof parsed.subtitles === "boolean") {
+      runtimePreferences.subtitles = parsed.subtitles;
+    }
+    if (typeof parsed.touchControls === "boolean") {
+      runtimePreferences.touchControls = parsed.touchControls;
+    }
+  } catch (error) {
+    console.warn("Failed to load runtime preferences:", error);
+  }
+};
+
+const savePlayerPreferences = () => {
+  localStorage.setItem(PLAYER_PREFERENCES_STORAGE_KEY, JSON.stringify(runtimePreferences));
+};
+
+const refreshContinueButtonState = () => {
+  if (!runtimeContinueButton) return;
+  const raw = localStorage.getItem(PLAYER_PROGRESS_STORAGE_KEY);
+  runtimeContinueButton.disabled = !raw;
+  runtimeContinueButton.textContent = raw ? "Continue" : "Continue";
+};
+
+const updateMenuCopy = () => {
+  const project = normalizeProject(runtimeSessionState.project ?? {});
+  const scene = getSceneById(project, runtimeSessionState.activeSceneId) ?? getActiveScene(project);
+  const level = getLevelById(project, runtimeSessionState.activeLevelId) ?? getStartingLevel(project);
+  if (runtimeMenuTitle) {
+    runtimeMenuTitle.textContent = scene?.name ? `Enter ${scene.name}` : "Enter the world";
+  }
+  if (runtimeMenuLead) {
+    runtimeMenuLead.textContent =
+      runtimeMode === "preview"
+        ? "Preview your draft build before publishing. When you are ready, Start Game enters the current campaign."
+        : "Load the published build and step into the game. Start Game begins the current campaign, Continue resumes the last session, and the menu bar opens settings or commands.";
+  }
+  if (runtimeMenuSessionText) {
+    runtimeMenuSessionText.textContent = scene
+      ? `${project.name || "Tyron"} - ${scene.name || "Scene"}${level?.name ? ` / ${level.name}` : ""}`
+      : runtimeMode === "preview"
+        ? "No draft build loaded yet."
+        : "No published build loaded yet.";
+  }
+  refreshContinueButtonState();
+};
+
+const applyRuntimePreferences = () => {
+  ORBIT_SPEED = 1.7 * runtimePreferences.cameraSpeed;
+  if (runtimeSubtitlesToggle) {
+    runtimeSubtitlesToggle.checked = runtimePreferences.subtitles;
+  }
+  if (runtimeTouchToggle) {
+    runtimeTouchToggle.checked = runtimePreferences.touchControls;
+  }
+  if (runtimeCameraSpeed) {
+    runtimeCameraSpeed.value = String(runtimePreferences.cameraSpeed);
+  }
+  const touchVisible = runtimePreferences.touchControls && runtimeHudState.mobileHud.enabled;
+  if (controls) {
+    controls.style.display = touchVisible ? "grid" : "none";
+  }
+  if (runtimeObjectiveText) {
+    runtimeObjectiveText.style.display =
+      runtimeHudState.objectiveText.visible && runtimePreferences.subtitles ? "block" : "none";
+  }
+};
+
+const openStartMenu = (view = "home") => {
+  runtimeSessionState.menuVisible = true;
+  runtimeSessionState.menuView = view;
+  runtimeSessionState.started = false;
+  setRuntimePaused(true, view === "home" ? "Press Start Game" : "Menu open");
+  syncMenuState();
+  updateMenuCopy();
+  if (runtimeStartScreen) {
+    runtimeStartScreen.classList.remove("runtime__menu-hidden");
+  }
+};
+
+const closeStartMenu = () => {
+  runtimeSessionState.menuVisible = false;
+  runtimeSessionState.menuView = "home";
+  runtimeSessionState.menuBarOpen = false;
+  runtimeSessionState.started = true;
+  syncMenuState();
+  setRuntimePaused(false);
+  if (canvas) {
+    canvas.focus({ preventScroll: true });
+  }
+};
+
+const toggleMenuPanel = (panel) => {
+  if (!panel) return;
+  const nextView =
+    panel === runtimeSettingsPanel
+      ? runtimeSessionState.menuView === "settings"
+        ? "home"
+        : "settings"
+      : panel === runtimeCommandsPanel
+        ? runtimeSessionState.menuView === "commands"
+          ? "home"
+          : "commands"
+        : "home";
+  setMenuView(nextView);
+};
+
+const setRuntimePauseOverlay = (visible, title = "Paused", description = "Press Resume to keep playing.") => {
+  if (runtimePauseOverlay) {
+    runtimePauseOverlay.classList.toggle("active", visible);
+    runtimePauseOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+  if (runtimePauseTitle) {
+    runtimePauseTitle.textContent = title;
+  }
+  if (runtimePauseDescription) {
+    runtimePauseDescription.textContent = description;
+  }
+};
+
+const setHudSlotVisibility = (element, visible, display = "block") => {
+  if (!element) return;
+  element.style.display = visible ? display : "none";
+};
+
+const updateHudFromProject = (project = runtimeSessionState.project) => {
+  if (!project) {
+    runtimeHudState.healthBar = { visible: true, position: "top-left" };
+    runtimeHudState.minimap = { visible: false, position: "top-right" };
+    runtimeHudState.objectiveText = { visible: false, text: "" };
+    runtimeHudState.sceneTitle = { visible: false, banner: false };
+    runtimeHudState.pauseMenu = { enabled: true, showQuit: true };
+    runtimeHudState.mobileHud = { enabled: true, compact: true };
+
+    setHudSlotVisibility(runtimeHealthText?.parentElement?.parentElement, true);
+    if (runtimeObjectiveText) {
+      runtimeObjectiveText.textContent = "";
+      runtimeObjectiveText.style.display = "none";
+    }
+    if (runtimeSceneBanner) {
+      runtimeSceneBanner.textContent = "";
+      runtimeSceneBanner.style.display = "none";
+    }
+    if (runtimeMinimap) {
+      runtimeMinimap.style.display = "none";
+    }
+    if (controls) {
+      controls.style.display = runtimePreferences.touchControls ? "grid" : "none";
+    }
+    applyRuntimePreferences();
+    return;
+  }
+
+  const normalized = normalizeProject(project ?? runtimeSessionState.project ?? {});
+  const level =
+    getLevelById(normalized, runtimeSessionState.activeLevelId) ??
+    getStartingLevel(normalized);
+  const scene = getSceneById(normalized, runtimeSessionState.activeSceneId) ?? getActiveScene(normalized);
+
+  runtimeHudState.healthBar = {
+    ...runtimeHudState.healthBar,
+    ...(normalized.hud?.healthBar ?? {}),
+  };
+  runtimeHudState.minimap = {
+    ...runtimeHudState.minimap,
+    ...(normalized.hud?.minimap ?? {}),
+  };
+  runtimeHudState.objectiveText = {
+    ...runtimeHudState.objectiveText,
+    ...(normalized.hud?.objectiveText ?? {}),
+    text:
+      normalized.hud?.objectiveText?.text ||
+      level?.objectiveText ||
+      runtimeHudState.objectiveText.text,
+  };
+  runtimeHudState.sceneTitle = {
+    ...runtimeHudState.sceneTitle,
+    ...(normalized.hud?.sceneTitle ?? {}),
+  };
+  runtimeHudState.pauseMenu = {
+    ...runtimeHudState.pauseMenu,
+    ...(normalized.hud?.pauseMenu ?? {}),
+  };
+  runtimeHudState.mobileHud = {
+    ...runtimeHudState.mobileHud,
+    ...(normalized.hud?.mobileHud ?? {}),
+  };
+
+  const healthRow = runtimeHealthText?.parentElement;
+  const healthTrack = runtimeHealthFill?.parentElement;
+  setHudSlotVisibility(healthRow, runtimeHudState.healthBar.visible, "flex");
+  setHudSlotVisibility(healthTrack, runtimeHudState.healthBar.visible, "block");
+  if (healthRow) {
+    healthRow.dataset.position = runtimeHudState.healthBar.position;
+  }
+
+  if (runtimeObjectiveText) {
+    runtimeObjectiveText.textContent = runtimeHudState.objectiveText.visible
+      ? runtimeHudState.objectiveText.text
+      : "";
+    runtimeObjectiveText.style.display =
+      runtimeHudState.objectiveText.visible && runtimePreferences.subtitles ? "block" : "none";
+  }
+
+  if (runtimeSceneBanner) {
+    runtimeSceneBanner.textContent = runtimeHudState.sceneTitle.banner
+      ? scene?.name ?? level?.name ?? "Scene"
+      : "";
+    runtimeSceneBanner.style.display = runtimeHudState.sceneTitle.visible && runtimeHudState.sceneTitle.banner
+      ? "block"
+      : "none";
+  }
+
+  if (runtimeMinimap) {
+    runtimeMinimap.style.display = runtimeHudState.minimap.visible ? "flex" : "none";
+    runtimeMinimap.dataset.position = runtimeHudState.minimap.position;
+    runtimeMinimap.style.top = runtimeHudState.minimap.position === "bottom-right" ? "auto" : "16px";
+    runtimeMinimap.style.bottom = runtimeHudState.minimap.position === "bottom-right" ? "16px" : "auto";
+  }
+
+  if (controls) {
+    controls.style.display =
+      runtimeHudState.mobileHud.enabled && runtimePreferences.touchControls ? "grid" : "none";
+  }
+  if (devTools) {
+    devTools.style.display = runtimeMode === "preview" ? "flex" : "none";
+  }
+  applyRuntimePreferences();
+};
+
+const refreshMinimapReadout = () => {
+  if (!runtimeMinimap) return;
+  if (!runtimeSessionState.project) {
+    runtimeMinimap.innerHTML = "<strong>Minimap</strong><span>No published project</span>";
+    return;
+  }
+  const level = getCurrentRuntimeLevel();
+  const playerTransform = getTransformForEntity(playerEntity);
+  const position = playerTransform?.position ?? [0, 0, 0];
+  runtimeMinimap.innerHTML = `
+    <strong>Minimap</strong>
+    <span>${level?.name ?? "Level"}${playerEntity ? ` - ${Math.round(position[0])}, ${Math.round(position[2])}` : ""}</span>
+    <span>${runtimeSessionState.paused ? "Paused" : "Live"}</span>
+  `;
+};
+
+const setRuntimePaused = (paused, reason = "Paused") => {
+  runtimeSessionState.paused = Boolean(paused);
+  if (controls) {
+    controls.style.pointerEvents = paused ? "none" : "auto";
+  }
+  if (runtimeSessionState.menuVisible) {
+    setRuntimePauseOverlay(false);
+  } else {
+    setRuntimePauseOverlay(
+      runtimeSessionState.paused,
+      reason,
+      runtimeHudState.pauseMenu.enabled
+        ? "Press Resume to continue, or restart the current level."
+        : "Gameplay is paused."
+    );
+  }
+  if (runtimeSessionState.paused) {
+    resetInputState();
+  }
+};
+
+const restartCurrentLevel = () => {
+  const level = getCurrentRuntimeLevel();
+  if (level) {
+    loadProjectLevel(level.id, { announce: false });
   }
 };
 
@@ -94,13 +469,37 @@ const orbitState = {
   radius: 6.5,
   focusHeight: 1.2,
 };
-const ORBIT_SPEED = 1.7;
+let ORBIT_SPEED = 1.7;
 const ORBIT_POLAR_MIN = 0.4;
 const ORBIT_POLAR_MAX = Math.PI - 0.4;
 const ORBIT_RADIUS_MIN = 3;
 const ORBIT_RADIUS_MAX = 16;
 const movementState = {
   jumpPrimed: false,
+};
+const runtimeSessionState = {
+  paused: false,
+  project: null,
+  activeSceneId: null,
+  activeLevelId: null,
+  completionSignal: null,
+  started: runtimeMode !== "client",
+  menuVisible: runtimeMode === "client",
+  menuBarOpen: false,
+  menuView: "home",
+};
+const runtimeHudState = {
+  healthBar: { visible: true, position: "top-left" },
+  minimap: { visible: false, position: "top-right" },
+  objectiveText: { visible: true, text: "Reach the objective." },
+  sceneTitle: { visible: true, banner: true },
+  pauseMenu: { enabled: true, showQuit: true },
+  mobileHud: { enabled: true, compact: true },
+};
+const runtimePreferences = {
+  cameraSpeed: 1,
+  subtitles: true,
+  touchControls: true,
 };
 
 let playerEntity = null;
@@ -471,6 +870,35 @@ const createScriptApi = (entity) => {
     endCutscene: (label = "Cutscene") => {
       playerControlEnabled = true;
       setRuntimeStatus(`${label} ended.`);
+      return true;
+    },
+    completeScene: (signal = "complete") => {
+      runtimeSessionState.completionSignal = signal;
+      setRuntimeStatus(`Scene completion requested: ${signal}.`);
+      return true;
+    },
+    setObjectiveText: (text) => {
+      if (runtimeHudState.objectiveText) {
+        runtimeHudState.objectiveText.text = String(text ?? "");
+        if (runtimeObjectiveText) {
+          runtimeObjectiveText.textContent = runtimeHudState.objectiveText.text;
+          runtimeObjectiveText.style.display = runtimeHudState.objectiveText.visible ? "block" : "none";
+        }
+      }
+      return true;
+    },
+    setSceneTitle: (text) => {
+      if (runtimeHudState.sceneTitle) {
+        runtimeHudState.sceneTitle.banner = true;
+        if (runtimeSessionState.project?.hud?.sceneTitle) {
+          runtimeSessionState.project.hud.sceneTitle.banner = true;
+        }
+        setRuntimeSceneLabel(String(text ?? ""));
+        if (runtimeSceneBanner) {
+          runtimeSceneBanner.textContent = String(text ?? "");
+          runtimeSceneBanner.style.display = "block";
+        }
+      }
       return true;
     },
     applyImpulse: (targetOrImpulse, maybeImpulse) => {
@@ -1266,6 +1694,7 @@ const buildScriptRunners = () => {
 };
 
 const runScripts = (dt) => {
+  if (runtimeSessionState.paused) return;
   scriptRunners.forEach((runner, id) => {
     if (!world.entities?.has?.(id)) return;
     try {
@@ -1277,6 +1706,7 @@ const runScripts = (dt) => {
 };
 
 const updateMovement = (dt) => {
+  if (runtimeSessionState.paused) return;
   if (!playerControlEnabled) return;
   if (!playerEntity) return;
   const transform = playerEntity.components.get(ComponentType.Transform);
@@ -1336,56 +1766,244 @@ const updateMovement = (dt) => {
   }
 };
 
-const loadSceneFromStorage = ({ announce = true } = {}) => {
-  const raw = localStorage.getItem("tyronScene");
-  if (!raw) {
-    activeCameraEntity = null;
-    selectedCameraEntityId = null;
-    activeCameraOrbitSignature = null;
-    combatPairs.clear();
-    refreshCameraPicker();
+const clearRuntimeSession = () => {
+  activeCameraEntity = null;
+  selectedCameraEntityId = null;
+  activeCameraOrbitSignature = null;
+  runtimeSessionState.activeSceneId = null;
+  runtimeSessionState.activeLevelId = null;
+  combatPairs.clear();
+  triggerPairs.clear();
+  spriteHitReactionState.clear();
+  runtimeSessionState.paused = false;
+  runtimeSessionState.completionSignal = null;
+  refreshCameraPicker();
+  updateHealthHud();
+  setRuntimePaused(false);
+  refreshMinimapReadout();
+};
+
+const getRuntimeProjectSource = () => {
+  const publishedRaw = localStorage.getItem(PUBLISHED_PROJECT_STORAGE_KEY);
+  const draftRaw = localStorage.getItem(DRAFT_PROJECT_STORAGE_KEY);
+  const legacySceneRaw = localStorage.getItem(PROJECT_STORAGE_KEYS.legacyScene);
+
+  if (runtimeMode === "preview") {
+    return loadProjectLike(draftRaw) ?? loadLegacySceneLike(legacySceneRaw);
+  }
+
+  return loadProjectLike(publishedRaw);
+};
+
+const savePlayerProgress = (level) => {
+  if (!level) return;
+  localStorage.setItem(
+    PLAYER_PROGRESS_STORAGE_KEY,
+    JSON.stringify({
+      levelId: level.id ?? null,
+      sceneId: level.sceneId ?? null,
+      updatedAt: Date.now(),
+    })
+  );
+  refreshContinueButtonState();
+};
+
+const loadPlayerProgress = () => {
+  try {
+    const raw = localStorage.getItem(PLAYER_PROGRESS_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    console.warn("Failed to read player progress:", error);
+    return null;
+  }
+};
+
+const applySpawnPointToLevel = (level, scene) => {
+  const spawn = level?.spawnPoint ?? scene?.spawnPoint ?? null;
+  if (!spawn) return;
+  const target = playerEntity ?? findPlayerEntity();
+  if (!target) return;
+  const transform = target.components.get(ComponentType.Transform);
+  if (!transform) return;
+
+  transform.position = [...spawn.position];
+  transform.rotation = [...spawn.rotation];
+};
+
+const loadProjectLevel = (levelId = null, { announce = true } = {}) => {
+  const normalizedProject = normalizeProject(runtimeSessionState.project ?? {});
+  const level =
+    (levelId ? getLevelById(normalizedProject, levelId) : getStartingLevel(normalizedProject)) ??
+    normalizedProject.levels[0] ??
+    null;
+  if (!level) {
+    clearRuntimeSession();
     if (announce) {
-      setRuntimeStatus("No saved scene found.");
+      setRuntimeStatus("No playable levels were found.");
+      setRuntimeSceneLabel("No playable content");
     }
     return null;
   }
 
-  try {
-    const data = JSON.parse(raw);
-    const loaded = deserializeScene(data);
-    world = loaded;
-    physics.reset();
-    engine.setWorld(loaded);
-    buildScriptRunners();
-    triggerPairs.clear();
-    combatPairs.clear();
-    spriteHitReactionState.clear();
-    preparePlayer();
-    prepareCamera();
-    ensureSpriteDefaults();
-    updateHealthHud();
-    setRuntimeSceneLabel("Loaded scene");
-    if (activeCameraEntity) {
-      setRuntimeSceneLabel(`Loaded scene - ${activeCameraEntity.name || "Camera"}`);
-    }
+  const scene =
+    getSceneById(normalizedProject, level.sceneId) ?? normalizedProject.scenes[0] ?? null;
+  if (!scene) {
+    clearRuntimeSession();
     if (announce) {
-      setRuntimeStatus("Loaded scene from local storage.");
-    }
-    return loaded;
-  } catch (error) {
-    console.warn("Failed to load saved scene:", error);
-    activeCameraEntity = null;
-    selectedCameraEntityId = null;
-    activeCameraOrbitSignature = null;
-    combatPairs.clear();
-    spriteHitReactionState.clear();
-    refreshCameraPicker();
-    updateHealthHud();
-    if (announce) {
-      setRuntimeStatus("Failed to load saved scene.");
+      setRuntimeStatus("No scene was linked to the level.");
+      setRuntimeSceneLabel(level.name ?? "Level");
     }
     return null;
   }
+
+  const loaded = deserializeScene(scene.sceneData);
+  world = loaded;
+  physics.reset();
+  engine.setWorld(loaded);
+  runtimeSessionState.project = normalizedProject;
+  runtimeSessionState.activeSceneId = scene.id;
+  runtimeSessionState.activeLevelId = level.id;
+  runtimeSessionState.completionSignal = null;
+  runtimeSessionState.paused = false;
+  buildScriptRunners();
+  triggerPairs.clear();
+  combatPairs.clear();
+  spriteHitReactionState.clear();
+  preparePlayer();
+  prepareCamera();
+  ensureSpriteDefaults();
+  applySpawnPointToLevel(level, scene);
+  updateHealthHud();
+  updateHudFromProject(normalizedProject);
+  refreshMinimapReadout();
+  setRuntimePaused(false);
+  setRuntimeSceneLabel(`${scene.name || "Scene"} - ${level.name || "Level"}`);
+  setRuntimeStatus(
+    announce
+      ? runtimeMode === "preview"
+        ? "Preview loaded from draft project."
+        : "Published project loaded."
+      : runtimeMode === "preview"
+        ? "Preview ready."
+        : "Play ready."
+  );
+  if (cameraSelect) {
+    cameraSelect.disabled = runtimeMode !== "preview";
+  }
+  savePlayerProgress(level);
+  updateMenuCopy();
+  return loaded;
+};
+
+const loadRuntimeProject = ({ announce = true } = {}) => {
+  const project = getRuntimeProjectSource();
+  if (!project) {
+    clearRuntimeSession();
+    if (announce) {
+      setRuntimeStatus(
+        runtimeMode === "preview"
+          ? "No draft project found. The default sandbox world is active."
+          : "No published project found. Publish from the editor to play here."
+      );
+      setRuntimeSceneLabel("No project loaded");
+    }
+    runtimeSessionState.project = null;
+    return null;
+  }
+
+  runtimeSessionState.project = normalizeProject(project);
+  runtimeSessionState.activeSceneId = runtimeSessionState.project.activeSceneId;
+  runtimeSessionState.activeLevelId = getStartingLevel(runtimeSessionState.project)?.id ?? null;
+  updateHudFromProject(runtimeSessionState.project);
+  return loadProjectLevel(runtimeSessionState.activeLevelId, { announce });
+};
+
+const savePreviewProject = () => {
+  if (runtimeMode !== "preview") return;
+  const draft = runtimeSessionState.project ? normalizeProject(runtimeSessionState.project) : null;
+  if (!draft) return;
+  localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, JSON.stringify(draft));
+  localStorage.setItem(PROJECT_STORAGE_KEYS.legacyScene, JSON.stringify(serializeScene(world)));
+  setRuntimeStatus("Preview project saved.");
+};
+
+const startGameFromMenu = () => {
+  runtimeSessionState.menuVisible = false;
+  syncMenuState();
+  const level = getStartingLevel(runtimeSessionState.project ?? {});
+  if (level) {
+    loadProjectLevel(level.id, { announce: false });
+  }
+  closeStartMenu();
+};
+
+const continueGameFromMenu = () => {
+  runtimeSessionState.menuVisible = false;
+  syncMenuState();
+  const progress = loadPlayerProgress();
+  const project = normalizeProject(runtimeSessionState.project ?? {});
+  const preferredLevel =
+    progress?.levelId ? getLevelById(project, progress.levelId) : null;
+  const level = preferredLevel ?? getStartingLevel(project) ?? project.levels[0] ?? null;
+  if (level) {
+    loadProjectLevel(level.id, { announce: false });
+  }
+  closeStartMenu();
+};
+
+const getCurrentRuntimeLevel = () => {
+  const project = normalizeProject(runtimeSessionState.project ?? {});
+  return (
+    getLevelById(project, runtimeSessionState.activeLevelId) ??
+    getStartingLevel(project) ??
+    project.levels[0] ??
+    null
+  );
+};
+
+const getNextRuntimeLevel = () => {
+  const project = normalizeProject(runtimeSessionState.project ?? {});
+  const current = getCurrentRuntimeLevel();
+  if (!current) return null;
+  if (current.nextLevelId) {
+    const linked = getLevelById(project, current.nextLevelId);
+    if (linked) return linked;
+  }
+  const currentIndex = project.levels.findIndex((level) => level.id === current.id);
+  return project.levels[currentIndex + 1] ?? null;
+};
+
+const processSceneCompletion = () => {
+  if (!runtimeSessionState.completionSignal) return;
+  const currentLevel = getCurrentRuntimeLevel();
+  if (!currentLevel) {
+    runtimeSessionState.completionSignal = null;
+    return;
+  }
+
+  const requestedSignal = runtimeSessionState.completionSignal;
+  const expectedSignal = currentLevel.completionSignal || "complete";
+  if (requestedSignal !== expectedSignal && requestedSignal !== "complete") {
+    runtimeSessionState.completionSignal = null;
+    return;
+  }
+
+  runtimeSessionState.completionSignal = null;
+  const nextLevel = getNextRuntimeLevel();
+  if (nextLevel) {
+    loadProjectLevel(nextLevel.id, { announce: true });
+    return;
+  }
+
+  setRuntimeStatus("You have cleared the final level.");
+  setRuntimeSceneLabel(`${currentLevel.name || "Level"} complete`);
+  setRuntimePauseOverlay(true, "Campaign Complete", "No next level is defined for this project.");
+  setMoveState("forward", false);
+  setMoveState("back", false);
+  setMoveState("left", false);
+  setMoveState("right", false);
 };
 
 preparePlayer();
@@ -1419,6 +2037,7 @@ const setOrbitState = (action, isActive) => {
 };
 
 const updateCameraOrbit = (dt) => {
+  if (runtimeSessionState.paused) return;
   const step = ORBIT_SPEED * dt;
   if (orbitState.left) {
     orbitState.azimuth += step;
@@ -1466,6 +2085,7 @@ const applyOrbitCamera = (targetEntity, smoothing = 0.18) => {
 
 const onKeyChange = (event, isActive) => {
   if (shouldIgnoreGameInput(event)) return;
+  if (runtimeSessionState.paused) return;
 
   const key = event.key.toLowerCase();
   const orbitKeys = ["i", "j", "k", "l"];
@@ -1517,12 +2137,26 @@ window.addEventListener("visibilitychange", () => {
 });
 
 const autoload = () => {
-  const loaded = loadSceneFromStorage({ announce: false });
+  const loaded = loadRuntimeProject({ announce: false });
   if (loaded) {
-    setRuntimeStatus("Loaded saved scene.");
+    setRuntimeStatus(runtimeMode === "preview" ? "Loaded draft preview." : "Loaded published project.");
   } else {
-    setRuntimeStatus("Using the default sandbox world.");
+    setRuntimeStatus(
+      runtimeMode === "preview"
+        ? "Using the default sandbox world."
+        : "No published project found."
+    );
+    setRuntimeSceneLabel("Default sandbox world");
+    updateHudFromProject(null);
   }
+  loadPlayerPreferences();
+  applyRuntimePreferences();
+  updateMenuCopy();
+  if (runtimeMode === "client" && runtimeEntryMode === "continue") {
+    continueGameFromMenu();
+    return;
+  }
+  closeStartMenu();
 };
 
 autoload();
@@ -1551,17 +2185,33 @@ if (controls) {
 window.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
-    const data = serializeScene(engine.world);
-    localStorage.setItem("tyronScene", JSON.stringify(data));
-    setRuntimeStatus("Scene saved to local storage.");
+    if (runtimeMode !== "preview") return;
+    savePreviewProject();
+  }
+  if (event.key === "Escape" && runtimeHudState.pauseMenu.enabled) {
+    event.preventDefault();
+    if (runtimeSessionState.menuBarOpen) {
+      runtimeSessionState.menuBarOpen = false;
+      syncMenuState();
+      return;
+    }
+    if (runtimeSessionState.menuVisible) {
+      if (runtimeSessionState.menuView !== "home") {
+        setMenuView("home");
+        return;
+      }
+      closeStartMenu();
+      return;
+    }
+    setRuntimePaused(!runtimeSessionState.paused);
   }
 });
 
 if (loadButton) {
   loadButton.addEventListener("click", () => {
-    const loaded = loadSceneFromStorage({ announce: true });
+    const loaded = loadRuntimeProject({ announce: true });
     if (!loaded) {
-      setRuntimeSceneLabel("Default sandbox world");
+      setRuntimeSceneLabel(runtimeMode === "preview" ? "Default sandbox world" : "No published project");
     }
   });
 }
@@ -1584,25 +2234,125 @@ if (cameraSelect) {
   });
 }
 
+if (runtimeResumeButton) {
+  runtimeResumeButton.addEventListener("click", () => {
+    setRuntimePaused(false);
+  });
+}
+
+if (runtimeRestartButton) {
+  runtimeRestartButton.addEventListener("click", () => {
+    restartCurrentLevel();
+    setRuntimePaused(false);
+  });
+}
+
+if (runtimeStartButton) {
+  runtimeStartButton.addEventListener("click", () => {
+    startGameFromMenu();
+  });
+}
+
+if (runtimeContinueButton) {
+  runtimeContinueButton.addEventListener("click", () => {
+    continueGameFromMenu();
+  });
+}
+
+if (runtimeMenuBurgerButton) {
+  runtimeMenuBurgerButton.addEventListener("click", () => {
+    toggleMenuTray();
+  });
+}
+
+if (runtimeMenuHomeButton) {
+  runtimeMenuHomeButton.addEventListener("click", () => {
+    window.location.href = "player.html";
+  });
+}
+
+if (runtimeMenuSettingsButton) {
+  runtimeMenuSettingsButton.addEventListener("click", () => {
+    runtimeSessionState.menuBarOpen = false;
+    openStartMenu("settings");
+  });
+}
+
+if (runtimeMenuCommandsButton) {
+  runtimeMenuCommandsButton.addEventListener("click", () => {
+    runtimeSessionState.menuBarOpen = false;
+    openStartMenu("commands");
+  });
+}
+
+if (runtimeSettingsBackButton) {
+  runtimeSettingsBackButton.addEventListener("click", () => {
+    setMenuView("home");
+  });
+}
+
+if (runtimeCommandsBackButton) {
+  runtimeCommandsBackButton.addEventListener("click", () => {
+    setMenuView("home");
+  });
+}
+
+if (runtimeCameraSpeed) {
+  runtimeCameraSpeed.addEventListener("input", () => {
+    const value = Number.parseFloat(runtimeCameraSpeed.value);
+    runtimePreferences.cameraSpeed = Number.isFinite(value) ? value : 1;
+    applyRuntimePreferences();
+    savePlayerPreferences();
+  });
+}
+
+if (runtimeSubtitlesToggle) {
+  runtimeSubtitlesToggle.addEventListener("change", () => {
+    runtimePreferences.subtitles = runtimeSubtitlesToggle.checked;
+    applyRuntimePreferences();
+    savePlayerPreferences();
+  });
+}
+
+if (runtimeTouchToggle) {
+  runtimeTouchToggle.addEventListener("change", () => {
+    runtimePreferences.touchControls = runtimeTouchToggle.checked;
+    applyRuntimePreferences();
+    savePlayerPreferences();
+  });
+}
+
 engine.addSystem((delta) => {
+  if (runtimeSessionState.paused) return;
   updateMovement(delta);
   updateCameraOrbit(delta);
   runScripts(delta);
 });
 engine.addSystem((delta) => {
+  if (runtimeSessionState.paused) return;
   updateSpriteRuntime(delta);
 });
 engine.addSystem((delta) => {
+  if (runtimeSessionState.paused) return;
   physics.update(delta, world, ComponentType);
 });
 engine.addSystem(() => {
+  if (runtimeSessionState.paused) return;
   processTriggerEvents();
 });
 engine.addSystem(() => {
+  if (runtimeSessionState.paused) return;
   processCombatEvents();
 });
 engine.addSystem((delta) => {
+  if (runtimeSessionState.paused) return;
   updateHealthState(delta);
+});
+engine.addSystem(() => {
+  refreshMinimapReadout();
+});
+engine.addSystem(() => {
+  processSceneCompletion();
 });
 engine.addSystem(() => {
   applyCamera();

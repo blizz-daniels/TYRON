@@ -109,41 +109,53 @@
         z-index: 2;
       }
 
-      .brand {
+      .runtime__meta-row {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 12px;
-      }
-
-      .brand__chip {
-        display: grid;
-        place-items: center;
-        width: 48px;
-        height: 48px;
-        border-radius: 14px;
-        background: linear-gradient(140deg, var(--accent), var(--accent-2));
-        color: #08121c;
-        font-size: 0.8rem;
-        font-weight: 800;
-        letter-spacing: 0.18em;
-      }
-
-      .brand strong,
-      .brand span {
-        display: block;
-      }
-
-      .brand strong {
-        font-size: 1rem;
-      }
-
-      .brand span {
-        margin-top: 3px;
         color: var(--muted);
-        font-size: 0.78rem;
+        font-size: 0.8rem;
+      }
+
+      .runtime__meta-note {
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.4;
+      }
+
+      .runtime__meta-track {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .runtime__meta-fill {
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        box-shadow: 0 0 16px rgba(85, 228, 218, 0.35);
+        transition: width 120ms ease;
       }
 
       .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .runtime__player-tools {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .runtime__devtools {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -209,6 +221,7 @@
       .runtime {
         position: relative;
         min-height: 0;
+        overflow: hidden;
       }
 
       .runtime-stage {
@@ -245,6 +258,368 @@
         border: 1px solid var(--stroke);
         backdrop-filter: blur(14px);
         pointer-events: none;
+      }
+
+      .runtime__floatbar {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        right: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        z-index: 4;
+        pointer-events: none;
+      }
+
+      .runtime__floatbar > * {
+        pointer-events: auto;
+      }
+
+      .runtime__health {
+        min-width: min(100%, 340px);
+        padding: 12px 14px;
+        border-radius: 18px;
+        background: rgba(7, 10, 18, 0.78);
+        border: 1px solid var(--stroke);
+        backdrop-filter: blur(14px);
+      }
+
+      .runtime__scene-banner {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: rgba(7, 10, 18, 0.82);
+        border: 1px solid var(--stroke);
+        backdrop-filter: blur(14px);
+        color: var(--text);
+        font-size: 0.85rem;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+        min-width: min(90vw, 360px);
+        text-align: center;
+      }
+
+      .runtime__objective {
+        position: absolute;
+        top: 64px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 14px;
+        border-radius: 14px;
+        background: rgba(7, 10, 18, 0.72);
+        border: 1px solid var(--stroke);
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: center;
+        max-width: min(90vw, 520px);
+        pointer-events: none;
+      }
+
+      .runtime__minimap {
+        position: absolute;
+        right: 16px;
+        top: 16px;
+        width: 160px;
+        min-height: 140px;
+        padding: 12px;
+        border-radius: 18px;
+        background: rgba(7, 10, 18, 0.76);
+        border: 1px solid var(--stroke);
+        backdrop-filter: blur(14px);
+        color: var(--muted);
+        font-size: 0.78rem;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .runtime__minimap strong {
+        color: var(--text);
+        font-size: 0.82rem;
+      }
+
+      .runtime__pause-overlay {
+        position: absolute;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 20px;
+        background: rgba(4, 8, 14, 0.62);
+        backdrop-filter: blur(10px);
+        z-index: 5;
+      }
+
+      .runtime__pause-overlay.active {
+        display: grid;
+      }
+
+      .runtime__pause-card {
+        width: min(100%, 360px);
+        padding: 20px;
+        border-radius: 20px;
+        background: rgba(9, 13, 22, 0.92);
+        border: 1px solid var(--stroke);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .runtime__pause-card h2 {
+        font-size: 1.1rem;
+      }
+
+      .runtime__pause-card p {
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 0.9rem;
+      }
+
+      .runtime__pause-card .toolbar {
+        justify-content: flex-start;
+      }
+
+      .runtime__start-screen {
+        position: absolute;
+        inset: 0;
+        z-index: 6;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background:
+          radial-gradient(circle at top left, rgba(85, 228, 218, 0.16), transparent 34%),
+          radial-gradient(circle at 80% 12%, rgba(255, 179, 90, 0.16), transparent 30%),
+          rgba(4, 8, 14, 0.72);
+        backdrop-filter: blur(16px);
+      }
+
+      .runtime__menu-shell {
+        width: min(100%, 540px);
+        display: grid;
+        gap: 12px;
+        position: relative;
+      }
+
+      .runtime__menu-dock {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .runtime__menu-burger {
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        border-radius: 14px;
+        font-size: 1.2rem;
+        font-weight: 800;
+      }
+
+      .runtime__menu-tray {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 18px;
+        border: 1px solid var(--stroke);
+        background: rgba(9, 13, 22, 0.92);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+        flex-wrap: wrap;
+      }
+
+      .runtime__player-tools .runtime__menu-tray {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        width: min(88vw, 360px);
+        z-index: 12;
+      }
+
+      .runtime__menu-tray button {
+        min-width: 110px;
+      }
+
+      .runtime__menu-panel {
+        width: 100%;
+        max-height: min(68vh, 520px);
+        overflow: auto;
+        overscroll-behavior: contain;
+        border-radius: 28px;
+        border: 1px solid var(--stroke);
+        background: rgba(9, 13, 22, 0.9);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: clamp(18px, 4vw, 28px);
+      }
+
+      .runtime__menu-kicker {
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.3em;
+        font-size: 0.72rem;
+      }
+
+      .runtime__menu-panel h1 {
+        font-size: clamp(2.1rem, 6vw, 4.6rem);
+        line-height: 0.94;
+        letter-spacing: -0.04em;
+        max-width: 11ch;
+      }
+
+      .runtime__menu-lead {
+        max-width: 52ch;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 0.98rem;
+      }
+
+      .runtime__menu-hero {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .runtime__menu-home {
+        min-height: 0;
+        justify-content: flex-start;
+      }
+
+      .runtime__menu-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .runtime__menu-actions button,
+      .runtime__menu-actions .ghost {
+        flex: 1 1 170px;
+        justify-content: center;
+      }
+
+      .runtime__menu-primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #071018;
+        border-color: transparent;
+        font-weight: 800;
+      }
+
+      .runtime__menu-card {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(14, 20, 34, 0.62);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .runtime__menu-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .runtime__menu-stack .runtime__menu-card {
+        flex: 0 0 auto;
+      }
+
+      .runtime__menu-card h2,
+      .runtime__menu-card h3 {
+        font-size: 0.9rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .runtime__menu-card p,
+      .runtime__menu-card li,
+      .runtime__menu-card span {
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.55;
+      }
+
+      .runtime__menu-list {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+        list-style: none;
+      }
+
+      .runtime__menu-list button {
+        width: 100%;
+        justify-content: flex-start;
+        padding-inline: 14px;
+      }
+
+      .runtime__menu-settings {
+        display: grid;
+        gap: 10px;
+      }
+
+      .runtime__menu-setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(10, 16, 28, 0.66);
+      }
+
+      .runtime__menu-setting strong {
+        font-size: 0.86rem;
+      }
+
+      .runtime__menu-setting span {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .runtime__menu-setting input[type="range"] {
+        width: 120px;
+        accent-color: var(--accent);
+      }
+
+      .runtime__menu-backrow {
+        display: flex;
+        justify-content: flex-end;
+        padding-top: 4px;
+      }
+
+      .runtime__menu-hidden {
+        display: none;
+      }
+
+      body[data-runtime-mode="client"] .runtime__devtools {
+        display: none;
+      }
+
+      body[data-runtime-mode="client"] .topbar {
+        display: none;
+      }
+
+      body[data-runtime-mode="client"] .runtime-app {
+        padding: 0;
+        gap: 0;
+        height: 100vh;
+        max-height: 100vh;
+      }
+
+      body[data-runtime-mode="client"] .runtime-stage {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        min-height: 100vh;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
       }
 
       .runtime__hud strong {
@@ -356,6 +731,12 @@
           min-height: calc(100svh - 92px);
         }
 
+        body[data-runtime-mode="client"] .runtime-stage {
+          min-height: 100svh;
+          height: 100svh;
+          inset: 0;
+        }
+
         .controls {
           right: 12px;
           bottom: 104px;
@@ -369,9 +750,78 @@
           bottom: 12px;
         }
 
+        .runtime__floatbar {
+          top: 12px;
+          left: 12px;
+          right: 12px;
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
         .runtime__legend {
           max-width: none;
           text-align: left;
+        }
+
+        .runtime__start-screen {
+          align-items: stretch;
+        }
+
+        .runtime__menu-shell {
+          width: min(100%, 560px);
+        }
+
+        .runtime__menu-panel {
+          max-height: calc(100svh - 40px);
+        }
+
+        .runtime__menu-tray {
+          width: min(92vw, 360px);
+          justify-content: flex-start;
+        }
+
+        .runtime__menu-tray button {
+          min-width: 0;
+          flex: 1 1 120px;
+        }
+
+        .runtime__menu-actions {
+          flex-direction: column;
+        }
+
+        .runtime__menu-actions button,
+        .runtime__menu-actions .ghost {
+          flex: 0 0 auto;
+          width: 100%;
+        }
+
+        .runtime__menu-setting {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .runtime__menu-setting input[type="range"] {
+          width: 100%;
+        }
+
+        .runtime__menu-home {
+          min-height: auto;
+        }
+      }
+
+      @media (min-width: 761px) {
+        body {
+          overflow: hidden;
+        }
+
+        .runtime-app {
+          height: 100vh;
+          max-height: 100vh;
+          overflow: hidden;
+        }
+
+        .runtime-stage {
+          min-height: 0;
         }
       }
 
@@ -385,47 +835,56 @@
       }
     </style>
   </head>
-  <body>
+  <body data-runtime-mode="client">
     <div class="runtime-app">
       <header class="topbar">
-        <div class="brand">
-          <span class="brand__chip">TYRON</span>
-          <div>
-            <strong>Tyron Runtime</strong>
-            <span id="runtimeStatus" aria-live="polite">Waiting for a saved scene...</span>
-          </div>
-        </div>
-        <div class="toolbar">
-          <button id="loadScene" type="button">Load Scene</button>
+        <span id="runtimeStatus" aria-live="polite">Waiting for a published build...</span>
+        <div class="runtime__devtools">
+          <button id="loadScene" type="button">Load Draft</button>
           <label class="ghost" style="display:flex;align-items:center;gap:10px;padding-right:12px;">
             <span style="color:var(--muted);font-size:0.78rem;">Camera</span>
             <select id="cameraSelect" aria-label="Choose active camera" disabled></select>
           </label>
-          <a class="ghost" href="index.html">Back to Demo</a>
+          <a class="ghost" href="editor.html">Back to Editor</a>
         </div>
       </header>
 
       <main class="runtime">
         <section class="runtime-stage">
           <canvas id="runtime" tabindex="0" aria-label="Tyron runtime viewport"></canvas>
-          <div class="runtime__hud">
-            <div class="runtime__hud-left">
-              <strong id="runtimeSceneLabel" aria-live="polite">Default sandbox world</strong>
-              <div class="runtime__health">
-                <div class="runtime__health-row">
-                  <span>Health</span>
-                  <span id="runtimeHealthText" aria-live="polite">100 / 100</span>
-                </div>
-                <div class="runtime__health-track" aria-hidden="true">
-                  <div class="runtime__health-fill" id="runtimeHealthFill"></div>
-                </div>
+          <div class="runtime__floatbar" aria-label="Floating game HUD">
+            <div class="runtime__health" aria-live="polite">
+              <div class="runtime__meta-row">
+                <span>Health</span>
+                <span id="runtimeHealthText">100 / 100</span>
               </div>
-              <span>WASD or arrows move, Space jumps, IJKL orbit the camera, tap the D-pad on mobile.</span>
+              <div class="runtime__meta-track" aria-hidden="true">
+                <div class="runtime__meta-fill" id="runtimeHealthFill"></div>
+              </div>
             </div>
-            <div class="runtime__legend">
-              Saved scenes are loaded from the browser localStorage key <code>tyronScene</code>.
+            <div class="runtime__player-tools">
+              <button
+                class="runtime__menu-burger"
+                id="runtimeMenuBurgerButton"
+                type="button"
+                aria-expanded="false"
+                aria-controls="runtimeMenuTray"
+                aria-label="Open player menu"
+              >
+                &#9776;
+              </button>
+              <div class="runtime__menu-tray runtime__menu-hidden" id="runtimeMenuTray" aria-hidden="true">
+                <button id="runtimeMenuHomeButton" type="button">Home</button>
+                <button id="runtimeMenuSettingsButton" type="button">Settings</button>
+                <button id="runtimeMenuCommandsButton" type="button">Commands</button>
+              </div>
             </div>
           </div>
+          <div class="runtime__objective" id="runtimeObjectiveText">Objective text will appear here.</div>
+          <aside class="runtime__minimap" id="runtimeMinimap" aria-label="Minimap">
+            <strong>Minimap</strong>
+            <span>Scene overview will appear here.</span>
+          </aside>
           <div class="controls" aria-label="Movement controls" role="group">
             <button class="spacer" tabindex="-1" aria-hidden="true"></button>
             <button data-move="forward" type="button" aria-label="Move forward">&#9650;</button>
@@ -436,6 +895,101 @@
             <button class="spacer" tabindex="-1" aria-hidden="true"></button>
             <button data-move="jump" type="button" aria-label="Jump">&#8679;</button>
             <button class="spacer" tabindex="-1" aria-hidden="true"></button>
+          </div>
+          <div class="runtime__pause-overlay" id="runtimePauseOverlay" aria-hidden="true">
+            <div class="runtime__pause-card">
+              <h2 id="runtimePauseTitle">Paused</h2>
+              <p id="runtimePauseDescription">Press Resume to keep playing.</p>
+              <div class="toolbar">
+                <button id="runtimeResumeButton" type="button">Resume</button>
+                <button id="runtimeRestartButton" type="button">Restart</button>
+              </div>
+            </div>
+          </div>
+          <div class="runtime__start-screen runtime__menu-hidden" id="runtimeStartScreen" aria-hidden="true">
+            <div class="runtime__menu-shell" id="runtimeMenuShell" data-view="home">
+              <section class="runtime__menu-panel runtime__menu-home" id="runtimeHomePanel">
+                <div class="runtime__menu-hero">
+                  <p class="runtime__menu-kicker">Tyron Player</p>
+                  <h1 id="runtimeMenuTitle">Enter the world</h1>
+                  <p class="runtime__menu-lead" id="runtimeMenuLead">
+                    Load the published build and step into the game. Start Game begins the
+                    current campaign, Continue resumes the last session, and the menu button opens
+                    settings or commands.
+                  </p>
+                </div>
+
+                <div class="runtime__menu-actions">
+                  <button class="runtime__menu-primary" id="runtimeStartButton" type="button">
+                    Start Game
+                  </button>
+                  <button type="button" id="runtimeContinueButton">Continue</button>
+                </div>
+
+                <div class="runtime__menu-card">
+                  <h2>Session</h2>
+                  <p id="runtimeMenuSessionText">No build loaded yet.</p>
+                </div>
+              </section>
+
+              <section class="runtime__menu-panel runtime__menu-hidden" id="runtimeSettingsPanel" aria-hidden="true">
+                <p class="runtime__menu-kicker">Player Menu</p>
+                <h1>Settings</h1>
+                <p class="runtime__menu-lead">
+                  Adjust how the player experience feels without opening the editor.
+                </p>
+                <div class="runtime__menu-settings">
+                  <label class="runtime__menu-setting">
+                    <span>
+                      <strong>Camera speed</strong>
+                      <br />
+                      Adjust orbit responsiveness
+                    </span>
+                    <input id="runtimeCameraSpeed" type="range" min="0.5" max="2.5" step="0.1" value="1" />
+                  </label>
+                  <label class="runtime__menu-setting">
+                    <span>
+                      <strong>Subtitle hints</strong>
+                      <br />
+                      Show objective helper text
+                    </span>
+                    <input id="runtimeSubtitlesToggle" type="checkbox" checked />
+                  </label>
+                  <label class="runtime__menu-setting">
+                    <span>
+                      <strong>Touch controls</strong>
+                      <br />
+                      Keep the mobile D-pad visible
+                    </span>
+                    <input id="runtimeTouchToggle" type="checkbox" checked />
+                  </label>
+                </div>
+                <div class="runtime__menu-backrow">
+                  <button id="runtimeSettingsBackButton" type="button">Back Home</button>
+                </div>
+              </section>
+
+              <section class="runtime__menu-panel runtime__menu-hidden" id="runtimeCommandsPanel" aria-hidden="true">
+                <p class="runtime__menu-kicker">Player Menu</p>
+                <h1>Commands</h1>
+                <p class="runtime__menu-lead">
+                  The main movement and menu controls are listed here so the home screen stays
+                  tight and easy to read.
+                </p>
+                <div class="runtime__menu-card">
+                  <ul class="runtime__menu-list">
+                    <li><span>WASD / arrows to move</span></li>
+                    <li><span>Space to jump</span></li>
+                    <li><span>IJKL to orbit the camera</span></li>
+                    <li><span>Escape to pause</span></li>
+                    <li><span>Tap the D-pad on mobile</span></li>
+                  </ul>
+                </div>
+                <div class="runtime__menu-backrow">
+                  <button id="runtimeCommandsBackButton" type="button">Back Home</button>
+                </div>
+              </section>
+            </div>
           </div>
         </section>
       </main>

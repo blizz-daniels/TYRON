@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Tyron player landing page with a MUGEN-style start screen for launching the published runtime."
+    />
+    <meta name="theme-color" content="#05070d" />
+    <title>Tyron Player</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #05070d;
+        --panel: rgba(10, 14, 24, 0.88);
+        --panel-soft: rgba(14, 20, 34, 0.72);
+        --text: #f2f6ff;
+        --muted: rgba(242, 246, 255, 0.68);
+        --accent: #4fe0d5;
+        --accent-2: #ff9f5e;
+        --accent-3: #ff5b8a;
+        --stroke: rgba(255, 255, 255, 0.12);
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+        font-family: "Manrope", "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(79, 224, 213, 0.16), transparent 24%),
+          radial-gradient(circle at 82% 12%, rgba(255, 159, 94, 0.16), transparent 25%),
+          radial-gradient(circle at 50% 82%, rgba(255, 91, 138, 0.1), transparent 30%),
+          linear-gradient(180deg, #090c16 0%, #05070d 56%, #020308 100%);
+        color: var(--text);
+        overflow: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 56px 56px;
+        opacity: 0.15;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.95), transparent 120%);
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.12), transparent);
+        background-size: 100% 8px;
+        opacity: 0.45;
+        mix-blend-mode: screen;
+      }
+
+      button,
+      a {
+        font: inherit;
+      }
+
+      .player-shell {
+        position: relative;
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        place-items: center;
+      }
+
+      .player-stage {
+        width: min(100%, 1280px);
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .player-hero,
+      .player-menu,
+      .player-modal {
+        border: 1px solid var(--stroke);
+        background: linear-gradient(180deg, rgba(10, 14, 24, 0.92), rgba(7, 10, 18, 0.96));
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .player-hero {
+        border-radius: 30px;
+        padding: clamp(24px, 4vw, 40px);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: min(82vh, 860px);
+        overflow: hidden;
+        position: relative;
+      }
+
+      .player-hero::before {
+        content: "";
+        position: absolute;
+        inset: 14px;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        pointer-events: none;
+      }
+
+      .player-kicker {
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.34em;
+        font-size: 0.72rem;
+      }
+
+      .player-title {
+        margin-top: 12px;
+        font-family: "Impact", "Haettenschweiler", "Arial Narrow Bold", sans-serif;
+        font-size: clamp(3.8rem, 10vw, 8rem);
+        line-height: 0.88;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-shadow:
+          0 0 22px rgba(79, 224, 213, 0.22),
+          0 0 44px rgba(255, 91, 138, 0.12);
+      }
+
+      .player-subtitle {
+        margin-top: 18px;
+        max-width: 44ch;
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 1rem;
+      }
+
+      .player-strip {
+        margin-top: 26px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--stroke);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+      }
+
+      .player-grid {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .player-card {
+        padding: 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .player-card strong,
+      .player-card span {
+        display: block;
+      }
+
+      .player-card strong {
+        font-size: 0.9rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .player-card span {
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 0.9rem;
+      }
+
+      .player-footer {
+        margin-top: 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .player-menu {
+        border-radius: 30px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: min(82vh, 860px);
+      }
+
+      .player-menu__header {
+        padding: 16px 16px 8px;
+        border-radius: 20px;
+        background:
+          linear-gradient(135deg, rgba(79, 224, 213, 0.1), rgba(255, 159, 94, 0.08)),
+          rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+      }
+
+      .player-menu__header h2 {
+        font-family: "Impact", "Haettenschweiler", "Arial Narrow Bold", sans-serif;
+        font-size: clamp(1.8rem, 4vw, 2.7rem);
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+
+      .player-menu__header p {
+        margin-top: 8px;
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 0.94rem;
+      }
+
+      .player-menu__list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .player-menu__button {
+        width: 100%;
+        min-height: 56px;
+        padding: 14px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background:
+          linear-gradient(180deg, rgba(14, 20, 34, 0.95), rgba(8, 12, 20, 0.98));
+        color: var(--text);
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-weight: 800;
+        cursor: pointer;
+        transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+        text-align: left;
+      }
+
+      .player-menu__button:hover,
+      .player-menu__button:focus-visible {
+        transform: translateY(-1px);
+        border-color: rgba(79, 224, 213, 0.5);
+        box-shadow: 0 0 0 1px rgba(79, 224, 213, 0.14), 0 18px 30px rgba(0, 0, 0, 0.22);
+        outline: none;
+      }
+
+      .player-menu__button span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: none;
+        font-weight: 500;
+      }
+
+      .player-menu__button--primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #071018;
+        border-color: transparent;
+      }
+
+      .player-menu__button--accent {
+        background: linear-gradient(135deg, rgba(255, 91, 138, 0.22), rgba(79, 224, 213, 0.14));
+      }
+
+      .player-menu__status {
+        margin-top: auto;
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 0.9rem;
+      }
+
+      .player-modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 20px;
+        background: rgba(3, 6, 12, 0.72);
+        z-index: 10;
+      }
+
+      .player-modal.active {
+        display: grid;
+      }
+
+      .player-modal__card {
+        width: min(100%, 560px);
+        max-height: min(82vh, 760px);
+        overflow: auto;
+        border-radius: 28px;
+        border: 1px solid var(--stroke);
+        background: rgba(8, 12, 20, 0.96);
+        box-shadow: 0 24px 90px rgba(0, 0, 0, 0.55);
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .player-modal__card h3 {
+        font-family: "Impact", "Haettenschweiler", "Arial Narrow Bold", sans-serif;
+        font-size: 2rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+
+      .player-modal__card p,
+      .player-modal__card li {
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 0.94rem;
+      }
+
+      .player-modal__list {
+        display: grid;
+        gap: 10px;
+        list-style: none;
+        margin-top: 8px;
+      }
+
+      .player-setting {
+        display: grid;
+        gap: 8px;
+        padding: 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .player-setting label {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+        font-size: 0.86rem;
+        color: var(--text);
+      }
+
+      .player-setting input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      .player-setting input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent);
+      }
+
+      .player-modal__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+        padding: 10px 16px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .button--primary {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #071018;
+        border-color: transparent;
+        font-weight: 800;
+      }
+
+      .button--ghost {
+        background: transparent;
+      }
+
+      .player-backdrop {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(circle at 50% 30%, rgba(79, 224, 213, 0.12), transparent 28%),
+          radial-gradient(circle at 80% 68%, rgba(255, 159, 94, 0.1), transparent 24%),
+          radial-gradient(circle at 12% 72%, rgba(255, 91, 138, 0.08), transparent 22%);
+      }
+
+      .player-modal__back {
+        align-self: flex-end;
+      }
+
+      @media (max-width: 960px) {
+        body {
+          overflow: auto;
+        }
+
+        .player-shell {
+          padding: 14px;
+        }
+
+        .player-stage {
+          grid-template-columns: 1fr;
+        }
+
+        .player-hero,
+        .player-menu {
+          min-height: auto;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .player-title {
+          font-size: clamp(3rem, 16vw, 5rem);
+        }
+
+        .player-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .player-menu {
+          padding: 16px;
+        }
+
+        .player-menu__button {
+          letter-spacing: 0.12em;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-backdrop" aria-hidden="true"></div>
+    <main class="player-shell">
+      <section class="player-stage" aria-labelledby="playerTitle">
+        <article class="player-hero">
+          <div>
+            <p class="player-kicker">Tyron Player Select</p>
+            <h1 class="player-title" id="playerTitle">Mythic Clash</h1>
+            <p class="player-subtitle">
+              A clean front page for the published build. Choose a mode, tune your settings, then
+              drop into the runtime without the play screen feeling layered on top of a menu.
+            </p>
+            <div class="player-strip" aria-label="Player status">
+              <span class="chip">Published build</span>
+              <span class="chip">Local save aware</span>
+              <span class="chip">Browser runtime</span>
+            </div>
+            <div class="player-grid">
+              <article class="player-card">
+                <strong>Campaign</strong>
+                <span>Start the current story from the beginning.</span>
+              </article>
+              <article class="player-card">
+                <strong>Continue</strong>
+                <span>Jump back into the last saved level if one exists.</span>
+              </article>
+              <article class="player-card">
+                <strong>Commands</strong>
+                <span>Read the play controls before entering the runtime.</span>
+              </article>
+              <article class="player-card">
+                <strong>Settings</strong>
+                <span>Persist player preferences locally for the runtime.</span>
+              </article>
+            </div>
+          </div>
+
+          <div class="player-footer">
+            <span>Press Start to enter the arena.</span>
+            <a class="button button--ghost" href="index.html">Back to Site</a>
+          </div>
+        </article>
+
+        <aside class="player-menu" aria-label="Player menu">
+          <div class="player-menu__header">
+            <h2>Player Menu</h2>
+            <p>
+              This page acts like a dedicated game front-end. The actual runtime stays separate,
+              so gameplay opens cleanly instead of feeling like a menu floating over the play view.
+            </p>
+          </div>
+
+          <div class="player-menu__list">
+            <button class="player-menu__button player-menu__button--primary" data-entry="start">
+              Start Game
+              <span>Launch the published runtime from the beginning.</span>
+            </button>
+            <button class="player-menu__button" data-entry="continue">
+              Continue
+              <span>Resume from local progress when available.</span>
+            </button>
+            <button class="player-menu__button player-menu__button--accent" data-modal="settings">
+              Settings
+              <span>Adjust player preferences on the landing page.</span>
+            </button>
+            <button class="player-menu__button" data-modal="commands">
+              Commands
+              <span>View the control list before you play.</span>
+            </button>
+            <button class="player-menu__button" data-modal="credits">
+              Credits
+              <span>See the project and build notes.</span>
+            </button>
+          </div>
+
+          <div class="player-menu__status" id="continueStatus" aria-live="polite">
+            Checking local save data...
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <section class="player-modal" id="settingsModal" aria-hidden="true">
+      <div class="player-modal__card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <p class="player-kicker">Player Menu</p>
+        <h3 id="settingsTitle">Settings</h3>
+        <p>These preferences stay in local storage and carry into the runtime.</p>
+        <div class="player-setting">
+          <label for="playerCameraSpeed">Camera speed</label>
+          <input id="playerCameraSpeed" type="range" min="0.5" max="2.5" step="0.1" value="1" />
+        </div>
+        <div class="player-setting">
+          <label for="playerSubtitles">Subtitle hints</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <span>Show helper text in the runtime</span>
+            <input id="playerSubtitles" type="checkbox" checked />
+          </div>
+        </div>
+        <div class="player-setting">
+          <label for="playerTouch">Touch controls</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <span>Keep the mobile D-pad visible</span>
+            <input id="playerTouch" type="checkbox" checked />
+          </div>
+        </div>
+        <div class="player-modal__actions">
+          <button class="button button--ghost player-modal__back" type="button" data-close-modal>Back</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="player-modal" id="commandsModal" aria-hidden="true">
+      <div class="player-modal__card" role="dialog" aria-modal="true" aria-labelledby="commandsTitle">
+        <p class="player-kicker">Player Menu</p>
+        <h3 id="commandsTitle">Commands</h3>
+        <ul class="player-modal__list">
+          <li>WASD or arrow keys move the character.</li>
+          <li>Space jumps.</li>
+          <li>IJKL orbit the camera in the runtime.</li>
+          <li>Escape pauses the game.</li>
+          <li>Tap the on-screen D-pad on mobile.</li>
+        </ul>
+        <div class="player-modal__actions">
+          <button class="button button--ghost player-modal__back" type="button" data-close-modal>Back</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="player-modal" id="creditsModal" aria-hidden="true">
+      <div class="player-modal__card" role="dialog" aria-modal="true" aria-labelledby="creditsTitle">
+        <p class="player-kicker">Player Menu</p>
+        <h3 id="creditsTitle">Credits</h3>
+        <p>
+          Tyron browser runtime and editor experience. This landing page stays separate from the
+          play runtime so the game opens cleanly.
+        </p>
+        <div class="player-modal__actions">
+          <button class="button button--ghost player-modal__back" type="button" data-close-modal>Back</button>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      const PLAYER_PROGRESS_STORAGE_KEY = "tyronPlayerProgress";
+      const PLAYER_PREFERENCES_STORAGE_KEY = "tyronPlayerPreferences";
+      const settingsModal = document.getElementById("settingsModal");
+      const commandsModal = document.getElementById("commandsModal");
+      const creditsModal = document.getElementById("creditsModal");
+      const continueStatus = document.getElementById("continueStatus");
+      const playerCameraSpeed = document.getElementById("playerCameraSpeed");
+      const playerSubtitles = document.getElementById("playerSubtitles");
+      const playerTouch = document.getElementById("playerTouch");
+      const modalStack = [settingsModal, commandsModal, creditsModal];
+      const preferences = {
+        cameraSpeed: 1,
+        subtitles: true,
+        touchControls: true,
+      };
+
+      const loadPreferences = () => {
+        try {
+          const raw = localStorage.getItem(PLAYER_PREFERENCES_STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (Number.isFinite(parsed.cameraSpeed)) {
+            preferences.cameraSpeed = Math.min(Math.max(parsed.cameraSpeed, 0.5), 2.5);
+          }
+          if (typeof parsed.subtitles === "boolean") {
+            preferences.subtitles = parsed.subtitles;
+          }
+          if (typeof parsed.touchControls === "boolean") {
+            preferences.touchControls = parsed.touchControls;
+          }
+        } catch (error) {
+          console.warn("Failed to load player preferences:", error);
+        }
+      };
+
+      const savePreferences = () => {
+        localStorage.setItem(PLAYER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+      };
+
+      const refreshContinueState = () => {
+        const hasProgress = Boolean(localStorage.getItem(PLAYER_PROGRESS_STORAGE_KEY));
+        const continueButton = document.querySelector('[data-entry="continue"]');
+        if (continueButton instanceof HTMLButtonElement) {
+          continueButton.disabled = !hasProgress;
+        }
+        if (continueStatus) {
+          continueStatus.textContent = hasProgress
+            ? "Continue is ready. Your last save will load in the runtime."
+            : "No local save found yet. Start Game will begin a fresh run.";
+        }
+      };
+
+      const openModal = (modal) => {
+        modalStack.forEach((item) => {
+          if (!item) return;
+          item.classList.remove("active");
+          item.setAttribute("aria-hidden", "true");
+        });
+        if (modal) {
+          modal.classList.add("active");
+          modal.setAttribute("aria-hidden", "false");
+        }
+      };
+
+      const closeModals = () => {
+        modalStack.forEach((item) => {
+          if (!item) return;
+          item.classList.remove("active");
+          item.setAttribute("aria-hidden", "true");
+        });
+      };
+
+      loadPreferences();
+      refreshContinueState();
+
+      if (playerCameraSpeed) {
+        playerCameraSpeed.value = String(preferences.cameraSpeed);
+      }
+      if (playerSubtitles) {
+        playerSubtitles.checked = preferences.subtitles;
+      }
+      if (playerTouch) {
+        playerTouch.checked = preferences.touchControls;
+      }
+
+      document.querySelectorAll("[data-entry]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const entry = button.getAttribute("data-entry");
+          const url = new URL("runtime.html", window.location.href);
+          url.searchParams.set("entry", entry === "continue" ? "continue" : "start");
+          window.location.href = url.toString();
+        });
+      });
+
+      document.querySelectorAll("[data-modal]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const modalId = `${button.getAttribute("data-modal")}Modal`;
+          openModal(document.getElementById(modalId));
+        });
+      });
+
+      document.querySelectorAll("[data-close-modal]").forEach((button) => {
+        button.addEventListener("click", closeModals);
+      });
+
+      if (playerCameraSpeed) {
+        playerCameraSpeed.addEventListener("input", () => {
+          preferences.cameraSpeed = Number.parseFloat(playerCameraSpeed.value) || 1;
+          savePreferences();
+        });
+      }
+
+      if (playerSubtitles) {
+        playerSubtitles.addEventListener("change", () => {
+          preferences.subtitles = playerSubtitles.checked;
+          savePreferences();
+        });
+      }
+
+      if (playerTouch) {
+        playerTouch.addEventListener("change", () => {
+          preferences.touchControls = playerTouch.checked;
+          savePreferences();
+        });
+      }
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeModals();
+        }
+      });
+    </script>
+  </body>
+</html>

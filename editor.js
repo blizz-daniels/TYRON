@@ -24,6 +24,22 @@ import {
   resolveSpriteColliderForFrame,
 } from "./src/engine/sprite-animation.js";
 import { serializeScene, deserializeScene } from "./src/engine/scene-io.js";
+import {
+  PROJECT_STORAGE_KEYS,
+  createLevelFromScene,
+  createProjectFromScene,
+  createSceneFromWorld,
+  getActiveScene,
+  getLevelById,
+  getSceneById,
+  getStartingLevel,
+  loadLegacySceneLike,
+  loadProjectLike,
+  normalizeProject,
+  publishProject,
+  replaceProjectScene,
+  getPublishedScenePayload,
+} from "./src/engine/project-io.js";
 
 const canvas = document.getElementById("viewport");
 const hierarchyList = document.getElementById("hierarchyList");
@@ -40,20 +56,46 @@ const importSpriteFolderButton = document.getElementById("importSpriteFolderBtn"
 const importSpriteFolderInput = document.getElementById("importSpriteFolder");
 const playButton = document.getElementById("playBtn");
 const stopButton = document.getElementById("stopBtn");
+const publishButton = document.getElementById("publishProject");
+const openPlayerButton = document.getElementById("openPlayer");
 const undoSceneButton = document.getElementById("undoScene");
 const redoSceneButton = document.getElementById("redoScene");
 const uploadedList = document.getElementById("uploadedList");
 const spriteBrowser = document.getElementById("spriteBrowser");
 const triggerPresetButtons = document.getElementById("triggerPresetButtons");
 const triggerPresetHint = document.getElementById("triggerPresetHint");
+const sceneManagerPanel = document.getElementById("sceneManager");
+const levelManagerPanel = document.getElementById("levelManager");
+const hudSettingsPanel = document.getElementById("hudSettings");
+const publishPanel = document.getElementById("publishPanel");
+const addSceneButton = document.getElementById("addSceneButton");
+const duplicateSceneButton = document.getElementById("duplicateSceneButton");
+const addLevelButton = document.getElementById("addLevelButton");
 const editTabButtons = Array.from(document.querySelectorAll("[data-edit-tab]"));
 const editPanels = Array.from(document.querySelectorAll("[data-edit-panel]"));
+const EDITOR_RETURN_TAB_STORAGE_KEY = "tyronEditorReturnTab";
+const DRAFT_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.draft;
+const PUBLISHED_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.published;
+const normalizeEditTabName = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 const importedAssets = [];
 const worldAssets = [];
 const uploadedAssets = [];
 const spriteCharacters = [];
 let renderAssets = () => {};
-let activeEditTab = "offset";
+const getStoredEditTab = () => {
+  const fallback = "offset";
+  try {
+    const stored = normalizeEditTabName(localStorage.getItem(EDITOR_RETURN_TAB_STORAGE_KEY));
+    if (stored && editTabButtons.some((button) => button.dataset.editTab === stored)) {
+      return stored;
+    }
+  } catch (error) {
+    console.warn("Failed to read editor tab state:", error);
+  }
+  return fallback;
+};
+let activeEditTab = getStoredEditTab();
 const SCRIPT_TEMPLATE = `// Attach scripts to entities.
 // Try helpers like:
 // api.onTriggerEnter((self, other) => { ... })
@@ -65,8 +107,13 @@ function update(entity, dt, world, THREE, engine, api) {
 `;
 
 const activateEditTab = (tabName, { focus = false } = {}) => {
-  const nextTab = tabName || "offset";
+  const nextTab = normalizeEditTabName(tabName) || "offset";
   activeEditTab = nextTab;
+  try {
+    localStorage.setItem(EDITOR_RETURN_TAB_STORAGE_KEY, nextTab);
+  } catch (error) {
+    console.warn("Failed to persist editor tab state:", error);
+  }
   editTabButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.editTab === nextTab);
   });
@@ -273,6 +320,10 @@ let selectedSpriteAnimationName = null;
 let runtimeWindow = null;
 let codeEditor = null;
 let suppressCodeEditorSync = false;
+let projectState = null;
+let activeSceneId = null;
+let activeLevelId = null;
+let runtimeModeWindow = null;
 const sceneHistory = {
   past: [],
   future: [],
@@ -542,6 +593,41 @@ const routeInspectorSections = () => {
   }
 };
 
+const clearElement = (element) => {
+  if (!element) return;
+  element.innerHTML = "";
+};
+
+const createProjectSection = (title, description) => {
+  const section = document.createElement("div");
+  section.className = "project-manager__section";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  section.appendChild(heading);
+  if (description) {
+    const meta = document.createElement("p");
+    meta.className = "project-manager__meta";
+    meta.textContent = description;
+    section.appendChild(meta);
+  }
+  return section;
+};
+
+const createProjectRow = () => {
+  const row = document.createElement("div");
+  row.className = "project-manager__row";
+  return row;
+};
+
+const createProjectButton = (label, onClick, className = "btn btn--ghost btn--small") => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+};
+
 function deleteEntity(entityId) {
   pushSceneHistory();
   const object = meshCache.get(entityId);
@@ -579,8 +665,10 @@ function createEntity(name = "Entity") {
 const openRuntimeWindow = () => {
   let sceneSaved = true;
   try {
-    const data = serializeScene(world);
-    localStorage.setItem("tyronScene", JSON.stringify(data));
+    localStorage.setItem(EDITOR_RETURN_TAB_STORAGE_KEY, activeEditTab);
+    const draft = saveDraftProject({ announce: false });
+    localStorage.setItem(PROJECT_STORAGE_KEYS.legacyScene, JSON.stringify(serializeScene(world)));
+    localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, JSON.stringify(draft));
   } catch (error) {
     sceneSaved = false;
     console.warn("Failed to persist scene for runtime preview:", error);
@@ -590,7 +678,7 @@ const openRuntimeWindow = () => {
     runtimeWindow.focus();
     runtimeWindow.location.reload();
   } else {
-    runtimeWindow = window.open("runtime.html", "_blank");
+    runtimeWindow = window.open("runtime.html?mode=preview", "_blank");
   }
   if (status) {
     status.textContent = sceneSaved
@@ -2497,6 +2585,900 @@ const rebuildInspector = () => {
   rebuildSpriteInspector();
 };
 
+const ensureProjectState = () => {
+  if (!projectState) {
+    projectState = createProjectFromScene(serializeScene(world));
+    activeSceneId = projectState.activeSceneId;
+    activeLevelId = projectState.runtime.startingLevelId;
+  }
+  projectState = normalizeProject(projectState);
+  activeSceneId = projectState.activeSceneId ?? projectState.scenes[0]?.id ?? activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  return projectState;
+};
+
+const getActiveProjectScene = () => {
+  const normalized = ensureProjectState();
+  return (
+    normalized.scenes.find((scene) => scene.id === (activeSceneId ?? normalized.activeSceneId)) ??
+    normalized.scenes[0] ??
+    null
+  );
+};
+
+const getActiveProjectLevel = () => {
+  const normalized = ensureProjectState();
+  return (
+    normalized.levels.find((level) => level.id === (activeLevelId ?? normalized.runtime.startingLevelId)) ??
+    normalized.levels.find((level) => level.starting) ??
+    normalized.levels[0] ??
+    null
+  );
+};
+
+const syncCurrentSceneIntoProject = () => {
+  const normalized = ensureProjectState();
+  const sceneId = activeSceneId ?? normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+  if (!sceneId) return normalized;
+
+  projectState = replaceProjectScene(normalized, sceneId, serializeScene(world));
+  projectState.activeSceneId = sceneId;
+  activeSceneId = sceneId;
+  activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  return projectState;
+};
+
+const saveDraftProject = ({ announce = true } = {}) => {
+  const draft = normalizeProject(syncCurrentSceneIntoProject());
+  projectState = draft;
+  activeSceneId = draft.activeSceneId;
+  activeLevelId = draft.runtime.startingLevelId;
+  localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, JSON.stringify(draft));
+  localStorage.setItem(PROJECT_STORAGE_KEYS.legacyScene, JSON.stringify(serializeScene(world)));
+  if (announce && status) {
+    status.textContent = "Draft project saved.";
+  }
+  return draft;
+};
+
+const loadProjectIntoEditor = (project) => {
+  const normalized = normalizeProject(project);
+  projectState = normalized;
+  activeSceneId = normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+  activeLevelId = normalized.runtime.startingLevelId ?? normalized.levels[0]?.id ?? null;
+  const scene = getActiveScene(normalized);
+  if (scene?.sceneData) {
+    setWorld(deserializeScene(scene.sceneData), { resetHistory: true });
+  }
+  rebuildProjectPanels();
+  updateProjectStatus();
+  return normalized;
+};
+
+const updateProjectStatus = () => {
+  if (!status) return;
+  const scene = getActiveProjectScene();
+  const level = getActiveProjectLevel();
+  status.textContent = `${scene?.name ?? "Scene"} / ${level?.name ?? "Level"}`;
+};
+
+const reorderProjectItem = (items, itemId, direction) => {
+  const currentIndex = items.findIndex((item) => item.id === itemId);
+  const targetIndex = currentIndex + direction;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= items.length) {
+    return items;
+  }
+
+  const next = [...items];
+  const [moved] = next.splice(currentIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  return next.map((item, index) => ({ ...item, order: index }));
+};
+
+const syncSceneRecord = (sceneId, patch = {}) => {
+  const normalized = ensureProjectState();
+  const scenes = normalized.scenes.map((scene) => {
+    if (scene.id !== sceneId) return scene;
+    return {
+      ...scene,
+      ...patch,
+      sceneData:
+        patch.sceneData ??
+        (sceneId === activeSceneId ? serializeScene(world) : scene.sceneData),
+      spawnPoint: patch.spawnPoint ?? scene.spawnPoint,
+    };
+  });
+  projectState = normalizeProject({
+    ...normalized,
+    scenes,
+    activeSceneId: activeSceneId ?? normalized.activeSceneId,
+  });
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  return projectState;
+};
+
+const syncLevelRecord = (levelId, patch = {}) => {
+  const normalized = ensureProjectState();
+  const levels = normalized.levels.map((level) =>
+    level.id === levelId
+      ? {
+          ...level,
+          ...patch,
+          spawnPoint: patch.spawnPoint ?? level.spawnPoint,
+        }
+      : level
+  );
+  projectState = normalizeProject({
+    ...normalized,
+    levels,
+  });
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  return projectState;
+};
+
+const switchProjectScene = (sceneId) => {
+  const normalized = ensureProjectState();
+  const nextScene = getSceneById(normalized, sceneId);
+  if (!nextScene) return false;
+
+  syncCurrentSceneIntoProject();
+  activeSceneId = nextScene.id;
+  projectState = normalizeProject({
+    ...projectState,
+    activeSceneId: nextScene.id,
+  });
+  setWorld(deserializeScene(nextScene.sceneData), { resetHistory: true });
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return true;
+};
+
+const switchProjectLevel = (levelId) => {
+  const normalized = ensureProjectState();
+  const nextLevel = getLevelById(normalized, levelId);
+  if (!nextLevel) return false;
+
+  syncCurrentSceneIntoProject();
+  activeLevelId = nextLevel.id;
+  activeSceneId = nextLevel.sceneId;
+  projectState = normalizeProject({
+    ...projectState,
+    activeSceneId: nextLevel.sceneId,
+  });
+  const nextScene = getSceneById(projectState, nextLevel.sceneId);
+  if (nextScene) {
+    setWorld(deserializeScene(nextScene.sceneData), { resetHistory: true });
+  }
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return true;
+};
+
+const setStartingLevel = (levelId) => {
+  const normalized = ensureProjectState();
+  projectState = normalizeProject({
+    ...normalized,
+    levels: normalized.levels.map((level) => ({
+      ...level,
+      starting: level.id === levelId,
+    })),
+    runtime: {
+      ...normalized.runtime,
+      startingLevelId: levelId,
+    },
+  });
+  activeLevelId = levelId;
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+};
+
+const createSceneAndLevel = (baseName = "Scene") => {
+  const normalized = ensureProjectState();
+  const scene = createSceneFromWorld(`${baseName} ${normalized.scenes.length + 1}`, world, {
+    order: normalized.scenes.length,
+  });
+  const level = createLevelFromScene(scene, {
+    name: scene.name,
+    order: normalized.levels.length,
+    starting: normalized.levels.length === 0,
+  });
+  projectState = normalizeProject({
+    ...normalized,
+    scenes: [...normalized.scenes, scene],
+    levels: [...normalized.levels, level],
+    activeSceneId: scene.id,
+    runtime: {
+      ...normalized.runtime,
+      startingLevelId: normalized.runtime.startingLevelId ?? level.id,
+    },
+  });
+  activeSceneId = scene.id;
+  activeLevelId = projectState.runtime.startingLevelId;
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return scene;
+};
+
+const duplicateCurrentScene = (sceneId = null) => {
+  const normalized = ensureProjectState();
+  const sourceScene =
+    (sceneId ? getSceneById(normalized, sceneId) : getActiveProjectScene()) ?? null;
+  if (!sourceScene) return null;
+
+  const duplicateScene = {
+    ...createSceneFromWorld(`${sourceScene.name} Copy`, world, {
+      order: normalized.scenes.length,
+      spawnPoint: sourceScene.spawnPoint,
+    }),
+    sceneData: cloneSceneData(sourceScene.sceneData),
+  };
+  const duplicateLevel = createLevelFromScene(duplicateScene, {
+    name: `${sourceScene.name} Copy`,
+    order: normalized.levels.length,
+  });
+  projectState = normalizeProject({
+    ...normalized,
+    scenes: [...normalized.scenes, duplicateScene],
+    levels: [...normalized.levels, duplicateLevel],
+    activeSceneId: duplicateScene.id,
+  });
+  activeSceneId = duplicateScene.id;
+  activeLevelId = projectState.runtime.startingLevelId;
+  setWorld(deserializeScene(duplicateScene.sceneData), { resetHistory: true });
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return duplicateScene;
+};
+
+const deleteSceneRecord = (sceneId) => {
+  const normalized = ensureProjectState();
+  if (normalized.scenes.length <= 1) return false;
+  const remainingScenes = normalized.scenes.filter((scene) => scene.id !== sceneId);
+  const fallbackScene = remainingScenes[0];
+  const remainingLevels = normalized.levels
+    .filter((level) => level.sceneId !== sceneId)
+    .map((level, index) => ({
+      ...level,
+      order: index,
+      sceneId: remainingScenes.some((scene) => scene.id === level.sceneId)
+        ? level.sceneId
+        : fallbackScene.id,
+    }));
+
+  projectState = normalizeProject({
+    ...normalized,
+    scenes: remainingScenes,
+    levels:
+      remainingLevels.length > 0
+        ? remainingLevels
+        : [
+            createLevelFromScene(fallbackScene, {
+              name: fallbackScene.name,
+              starting: true,
+              order: 0,
+            }),
+          ],
+    activeSceneId: normalized.activeSceneId === sceneId ? fallbackScene.id : normalized.activeSceneId,
+    runtime: {
+      ...normalized.runtime,
+      startingLevelId:
+        remainingLevels.find((level) => level.starting)?.id ??
+        normalized.runtime.startingLevelId ??
+        remainingLevels[0]?.id ??
+        null,
+    },
+  });
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId;
+  if (activeSceneId !== sceneId) {
+    const nextScene = getSceneById(projectState, activeSceneId);
+    if (nextScene) {
+      setWorld(deserializeScene(nextScene.sceneData), { resetHistory: true });
+    }
+  }
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return true;
+};
+
+const deleteLevelRecord = (levelId) => {
+  const normalized = ensureProjectState();
+  if (normalized.levels.length <= 1) return false;
+  const remainingLevels = normalized.levels.filter((level) => level.id !== levelId);
+  const nextStarting = remainingLevels.find((level) => level.starting) ?? remainingLevels[0];
+  projectState = normalizeProject({
+    ...normalized,
+    levels: remainingLevels.map((level, index) => ({
+      ...level,
+      order: index,
+      starting: nextStarting ? level.id === nextStarting.id : index === 0,
+    })),
+    runtime: {
+      ...normalized.runtime,
+      startingLevelId: nextStarting?.id ?? null,
+    },
+  });
+  activeLevelId = projectState.runtime.startingLevelId;
+  rebuildProjectPanels();
+  updateProjectStatus();
+  saveDraftProject({ announce: false });
+  return true;
+};
+
+const renderSceneManager = () => {
+  if (!sceneManagerPanel) return;
+  const normalized = ensureProjectState();
+  clearElement(sceneManagerPanel);
+
+  const section = createProjectSection(
+    "Scenes",
+    "Each scene stores a serialized world snapshot that can be placed into levels."
+  );
+  const list = document.createElement("div");
+  list.className = "project-manager__list";
+  const activeScene = getActiveProjectScene();
+
+  normalized.scenes.forEach((scene, index) => {
+    const card = document.createElement("div");
+    card.className = "project-manager__card";
+    if (scene.id === activeScene?.id) {
+      card.classList.add("active");
+    }
+
+    const row = createProjectRow();
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.value = scene.name;
+    nameInput.placeholder = "Scene name";
+    nameInput.addEventListener("change", () => {
+      syncSceneRecord(scene.id, { name: nameInput.value.trim() || "Scene" });
+      rebuildProjectPanels();
+      saveDraftProject({ announce: false });
+    });
+    row.appendChild(nameInput);
+    row.appendChild(
+      createProjectButton("Open", () => {
+        switchProjectScene(scene.id);
+      })
+    );
+    row.appendChild(
+      createProjectButton("Capture", () => {
+        syncSceneRecord(scene.id, { sceneData: serializeScene(world) });
+        saveDraftProject({ announce: false });
+        rebuildProjectPanels();
+      })
+    );
+    card.appendChild(row);
+
+    const meta = document.createElement("p");
+    meta.className = "project-manager__meta";
+    const entityCount = Array.isArray(scene.sceneData?.entities) ? scene.sceneData.entities.length : 0;
+    meta.textContent = `Scene ${index + 1} - ${entityCount} entities`;
+    card.appendChild(meta);
+
+    const controls = createProjectRow();
+    controls.appendChild(
+      createProjectButton("Up", () => {
+        projectState = normalizeProject({
+          ...ensureProjectState(),
+          scenes: reorderProjectItem(ensureProjectState().scenes, scene.id, -1),
+        });
+        saveDraftProject({ announce: false });
+        rebuildProjectPanels();
+      })
+    );
+    controls.appendChild(
+      createProjectButton("Down", () => {
+        projectState = normalizeProject({
+          ...ensureProjectState(),
+          scenes: reorderProjectItem(ensureProjectState().scenes, scene.id, 1),
+        });
+        saveDraftProject({ announce: false });
+        rebuildProjectPanels();
+      })
+    );
+    controls.appendChild(
+      createProjectButton("Duplicate", () => duplicateCurrentScene(scene.id))
+    );
+    controls.appendChild(
+      createProjectButton("Delete", () => deleteSceneRecord(scene.id), "btn btn--ghost btn--small danger")
+    );
+    card.appendChild(controls);
+
+    const spawnLabel = document.createElement("p");
+    spawnLabel.className = "project-manager__meta";
+    spawnLabel.textContent = `Spawn: ${scene.spawnPoint.position.map((value) => value.toFixed(2)).join(", ")}`;
+    card.appendChild(spawnLabel);
+
+    list.appendChild(card);
+  });
+
+  section.appendChild(list);
+  sceneManagerPanel.appendChild(section);
+};
+
+const renderLevelManager = () => {
+  if (!levelManagerPanel) return;
+  const normalized = ensureProjectState();
+  clearElement(levelManagerPanel);
+
+  const section = createProjectSection(
+    "Level Order",
+    "Levels define progression, the starting scene, and per-level spawn data."
+  );
+
+  const summaryRow = createProjectRow();
+  const startLabel = document.createElement("span");
+  startLabel.className = "project-manager__meta";
+  startLabel.textContent = `Starting level: ${getStartingLevel(normalized)?.name ?? "None"}`;
+  summaryRow.appendChild(startLabel);
+  section.appendChild(summaryRow);
+
+  const list = document.createElement("div");
+  list.className = "project-manager__list";
+
+  normalized.levels.forEach((level) => {
+    const card = document.createElement("div");
+    card.className = "project-manager__card";
+    if (level.id === activeLevelId) {
+      card.classList.add("active");
+    }
+
+    const row = createProjectRow();
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.value = level.name;
+    nameInput.placeholder = "Level name";
+    nameInput.addEventListener("change", () => {
+      syncLevelRecord(level.id, { name: nameInput.value.trim() || "Level" });
+      saveDraftProject({ announce: false });
+      rebuildProjectPanels();
+    });
+    row.appendChild(nameInput);
+
+    const sceneSelect = document.createElement("select");
+    normalized.scenes.forEach((scene) => {
+      const option = document.createElement("option");
+      option.value = scene.id;
+      option.textContent = scene.name;
+      if (scene.id === level.sceneId) {
+        option.selected = true;
+      }
+      sceneSelect.appendChild(option);
+    });
+    sceneSelect.addEventListener("change", () => {
+      syncLevelRecord(level.id, { sceneId: sceneSelect.value });
+      saveDraftProject({ announce: false });
+      rebuildProjectPanels();
+    });
+    row.appendChild(sceneSelect);
+    row.appendChild(
+      createProjectButton("Open", () => {
+        switchProjectLevel(level.id);
+      })
+    );
+    card.appendChild(row);
+
+    const detailRow = createProjectRow();
+    const startToggle = document.createElement("label");
+    startToggle.className = "project-manager__toggle";
+    const startRadio = document.createElement("input");
+    startRadio.type = "radio";
+    startRadio.name = "startingLevel";
+    startRadio.checked = level.id === normalized.runtime.startingLevelId;
+    startRadio.addEventListener("change", () => {
+      if (startRadio.checked) {
+        setStartingLevel(level.id);
+      }
+    });
+    startToggle.append(startRadio, document.createTextNode("Starting"));
+    detailRow.appendChild(startToggle);
+
+    const nextSelect = document.createElement("select");
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "No next level";
+    nextSelect.appendChild(noneOption);
+    normalized.levels.forEach((candidate) => {
+      if (candidate.id === level.id) return;
+      const option = document.createElement("option");
+      option.value = candidate.id;
+      option.textContent = candidate.name;
+      if (candidate.id === level.nextLevelId) {
+        option.selected = true;
+      }
+      nextSelect.appendChild(option);
+    });
+    nextSelect.addEventListener("change", () => {
+      syncLevelRecord(level.id, { nextLevelId: nextSelect.value || null });
+      saveDraftProject({ announce: false });
+    });
+    detailRow.appendChild(nextSelect);
+    detailRow.appendChild(
+      createProjectButton("Delete", () => deleteLevelRecord(level.id), "btn btn--ghost btn--small danger")
+    );
+    card.appendChild(detailRow);
+
+    const spawnSplit = document.createElement("div");
+    spawnSplit.className = "project-manager__split";
+    const spawnPosition = buildVectorField("Spawn Position", level.spawnPoint.position, (index, value) => {
+      syncLevelRecord(level.id, {
+        spawnPoint: {
+          ...level.spawnPoint,
+          position: level.spawnPoint.position.map((component, componentIndex) =>
+            componentIndex === index ? value : component
+          ),
+        },
+      });
+      saveDraftProject({ announce: false });
+    });
+    const spawnRotation = buildVectorField("Spawn Rotation", level.spawnPoint.rotation, (index, value) => {
+      syncLevelRecord(level.id, {
+        spawnPoint: {
+          ...level.spawnPoint,
+          rotation: level.spawnPoint.rotation.map((component, componentIndex) =>
+            componentIndex === index ? value : component
+          ),
+        },
+      });
+      saveDraftProject({ announce: false });
+    });
+    spawnSplit.append(spawnPosition.wrapper, spawnRotation.wrapper);
+    card.appendChild(spawnSplit);
+
+    const requirement = document.createElement("textarea");
+    requirement.value = level.completionRequirement;
+    requirement.placeholder = "Completion requirement";
+    requirement.addEventListener("change", () => {
+      syncLevelRecord(level.id, { completionRequirement: requirement.value });
+      saveDraftProject({ announce: false });
+    });
+    card.appendChild(requirement);
+
+    const objectiveRow = createProjectRow();
+    const signalInput = document.createElement("input");
+    signalInput.type = "text";
+    signalInput.value = level.completionSignal;
+    signalInput.placeholder = "Completion signal";
+    signalInput.addEventListener("change", () => {
+      syncLevelRecord(level.id, { completionSignal: signalInput.value.trim() });
+      saveDraftProject({ announce: false });
+    });
+    const objectiveInput = document.createElement("input");
+    objectiveInput.type = "text";
+    objectiveInput.value = level.objectiveText;
+    objectiveInput.placeholder = "Objective text";
+    objectiveInput.addEventListener("change", () => {
+      syncLevelRecord(level.id, { objectiveText: objectiveInput.value.trim() });
+      saveDraftProject({ announce: false });
+    });
+    objectiveRow.append(signalInput, objectiveInput);
+    card.appendChild(objectiveRow);
+
+    const orderRow = createProjectRow();
+    orderRow.appendChild(
+      createProjectButton("Up", () => {
+        projectState = normalizeProject({
+          ...ensureProjectState(),
+          levels: reorderProjectItem(ensureProjectState().levels, level.id, -1),
+        });
+        saveDraftProject({ announce: false });
+        rebuildProjectPanels();
+      })
+    );
+    orderRow.appendChild(
+      createProjectButton("Down", () => {
+        projectState = normalizeProject({
+          ...ensureProjectState(),
+          levels: reorderProjectItem(ensureProjectState().levels, level.id, 1),
+        });
+        saveDraftProject({ announce: false });
+        rebuildProjectPanels();
+      })
+    );
+    card.appendChild(orderRow);
+
+    list.appendChild(card);
+  });
+
+  section.appendChild(list);
+  levelManagerPanel.appendChild(section);
+};
+
+const renderHudSettings = () => {
+  if (!hudSettingsPanel) return;
+  const normalized = ensureProjectState();
+  clearElement(hudSettingsPanel);
+
+  const section = createProjectSection(
+    "HUD Settings",
+    "Configure what the player sees without exposing any editor controls."
+  );
+
+  const makeToggle = (label, checked, onChange) => {
+    const row = createProjectRow();
+    const wrapper = document.createElement("label");
+    wrapper.className = "project-manager__toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    input.addEventListener("change", () => onChange(input.checked));
+    wrapper.append(input, document.createTextNode(label));
+    row.appendChild(wrapper);
+    return row;
+  };
+
+  section.appendChild(
+    makeToggle("Health bar visible", normalized.hud.healthBar.visible, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          healthBar: {
+            ...ensureProjectState().hud.healthBar,
+            visible: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  const healthRow = createProjectRow();
+  const healthSelect = document.createElement("select");
+  ["top-left", "bottom-left"].forEach((position) => {
+    const option = document.createElement("option");
+    option.value = position;
+    option.textContent = position;
+    if (position === normalized.hud.healthBar.position) option.selected = true;
+    healthSelect.appendChild(option);
+  });
+  healthSelect.addEventListener("change", () => {
+    projectState = normalizeProject({
+      ...ensureProjectState(),
+      hud: {
+        ...ensureProjectState().hud,
+        healthBar: {
+          ...ensureProjectState().hud.healthBar,
+          position: healthSelect.value,
+        },
+      },
+    });
+    saveDraftProject({ announce: false });
+  });
+  healthRow.appendChild(healthSelect);
+  section.appendChild(healthRow);
+
+  section.appendChild(
+    makeToggle("Minimap visible", normalized.hud.minimap.visible, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          minimap: {
+            ...ensureProjectState().hud.minimap,
+            visible: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  const minimapRow = createProjectRow();
+  const minimapSelect = document.createElement("select");
+  ["top-right", "bottom-right"].forEach((position) => {
+    const option = document.createElement("option");
+    option.value = position;
+    option.textContent = position;
+    if (position === normalized.hud.minimap.position) option.selected = true;
+    minimapSelect.appendChild(option);
+  });
+  minimapSelect.addEventListener("change", () => {
+    projectState = normalizeProject({
+      ...ensureProjectState(),
+      hud: {
+        ...ensureProjectState().hud,
+        minimap: {
+          ...ensureProjectState().hud.minimap,
+          position: minimapSelect.value,
+        },
+      },
+    });
+    saveDraftProject({ announce: false });
+  });
+  minimapRow.appendChild(minimapSelect);
+  section.appendChild(minimapRow);
+
+  const objectiveRow = createProjectRow();
+  const objectiveInput = document.createElement("input");
+  objectiveInput.type = "text";
+  objectiveInput.value = normalized.hud.objectiveText.text;
+  objectiveInput.placeholder = "Objective text";
+  objectiveInput.addEventListener("change", () => {
+    projectState = normalizeProject({
+      ...ensureProjectState(),
+      hud: {
+        ...ensureProjectState().hud,
+        objectiveText: {
+          ...ensureProjectState().hud.objectiveText,
+          text: objectiveInput.value.trim(),
+        },
+      },
+    });
+    saveDraftProject({ announce: false });
+  });
+  objectiveRow.appendChild(objectiveInput);
+  section.appendChild(objectiveRow);
+
+  section.appendChild(
+    makeToggle("Objective text visible", normalized.hud.objectiveText.visible, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          objectiveText: {
+            ...ensureProjectState().hud.objectiveText,
+            visible: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  section.appendChild(
+    makeToggle("Scene title banner", normalized.hud.sceneTitle.banner, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          sceneTitle: {
+            ...ensureProjectState().hud.sceneTitle,
+            banner: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  section.appendChild(
+    makeToggle("Pause menu enabled", normalized.hud.pauseMenu.enabled, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          pauseMenu: {
+            ...ensureProjectState().hud.pauseMenu,
+            enabled: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  section.appendChild(
+    makeToggle("Mobile HUD enabled", normalized.hud.mobileHud.enabled, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          mobileHud: {
+            ...ensureProjectState().hud.mobileHud,
+            enabled: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  section.appendChild(
+    makeToggle("Compact mobile layout", normalized.hud.mobileHud.compact, (checked) => {
+      projectState = normalizeProject({
+        ...ensureProjectState(),
+        hud: {
+          ...ensureProjectState().hud,
+          mobileHud: {
+            ...ensureProjectState().hud.mobileHud,
+            compact: checked,
+          },
+        },
+      });
+      saveDraftProject({ announce: false });
+    })
+  );
+
+  hudSettingsPanel.appendChild(section);
+};
+
+const renderPublishPanel = () => {
+  if (!publishPanel) return;
+  const normalized = ensureProjectState();
+  clearElement(publishPanel);
+
+  const section = createProjectSection(
+    "Publish Flow",
+    "Publish generates the client-ready build that the player page loads."
+  );
+
+  const draftMeta = document.createElement("p");
+  draftMeta.className = "project-manager__meta";
+  draftMeta.textContent = `Draft scenes: ${normalized.scenes.length}, levels: ${normalized.levels.length}`;
+  section.appendChild(draftMeta);
+
+  const statusBlock = document.createElement("div");
+  statusBlock.className = "project-manager__card";
+  const publishedLine = document.createElement("p");
+  publishedLine.className = "project-manager__meta";
+  publishedLine.textContent = normalized.metadata.publishedAt
+    ? `Last published: ${normalized.metadata.publishedAt}`
+    : "Not published yet.";
+  const versionLine = document.createElement("p");
+  versionLine.className = "project-manager__meta";
+  versionLine.textContent = `Published version: ${normalized.metadata.publishedVersion || 0}`;
+  statusBlock.append(publishedLine, versionLine);
+  section.appendChild(statusBlock);
+
+  const actionRow = createProjectRow();
+  actionRow.appendChild(createProjectButton("Save Draft", () => saveDraftProject({ announce: true })));
+  actionRow.appendChild(
+    createProjectButton("Publish", () => {
+      syncCurrentSceneIntoProject();
+      const published = publishProject(projectState, { source: "published" });
+      const payload = getPublishedScenePayload(published);
+      projectState = published;
+      localStorage.setItem(PUBLISHED_PROJECT_STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, JSON.stringify(normalizeProject(projectState)));
+      localStorage.setItem(PROJECT_STORAGE_KEYS.legacyScene, JSON.stringify(serializeScene(world)));
+      rebuildProjectPanels();
+      updateProjectStatus();
+      if (status) {
+        status.textContent = "Project published for client playback.";
+      }
+      const fileName = `${published.name || "tyron-project"}.json`;
+      downloadJsonFile(fileName, payload);
+    })
+  );
+  actionRow.appendChild(
+    createProjectButton("Open Player", () => {
+      saveDraftProject({ announce: false });
+      window.open("runtime.html", "_blank");
+    })
+  );
+  actionRow.appendChild(
+    createProjectButton("Open Preview", () => {
+      openRuntimeWindow();
+    })
+  );
+  section.appendChild(actionRow);
+
+  const note = document.createElement("p");
+  note.className = "project-manager__meta";
+  note.textContent =
+    "Drafts stay in tyronProjectDraft. The client page only reads tyronPublishedProject.";
+  section.appendChild(note);
+
+  publishPanel.appendChild(section);
+};
+
+const rebuildProjectPanels = () => {
+  renderSceneManager();
+  renderLevelManager();
+  renderHudSettings();
+  renderPublishPanel();
+};
+
 const selectEntity = (entityId) => {
   if (!sceneHistory.isRestoring && selectedEntityId && selectedEntityId !== entityId) {
     commitSelectedEntityTransform();
@@ -2527,10 +3509,179 @@ const setWorld = (newWorld, options = {}) => {
   colliderHelpers.clear();
   hitBoxHelpers.forEach((helper) => engine.scene.remove(helper));
   hitBoxHelpers.clear();
+  if (options.resetHistory !== false) {
+    sceneHistory.past.length = 0;
+    sceneHistory.future.length = 0;
+    updateSceneHistoryButtons();
+  }
   const first = world.getEntities()[0];
   const nextSelection = selectionId ?? (first ? first.id : null);
   selectEntity(nextSelection);
 };
+
+if (false) {
+
+const ensureProjectState = () => {
+  if (projectState) {
+    return normalizeProject(projectState);
+  }
+
+  projectState = createProjectFromScene(serializeScene(world));
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId;
+  return projectState;
+};
+
+const syncCurrentSceneIntoProject = () => {
+  const normalized = ensureProjectState();
+  const sceneId = activeSceneId ?? normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+  if (!sceneId) return normalized;
+
+  projectState = replaceProjectScene(normalized, sceneId, serializeScene(world));
+  projectState.activeSceneId = sceneId;
+  activeSceneId = sceneId;
+  return projectState;
+};
+
+const saveDraftProject = ({ announce = true } = {}) => {
+  const draft = normalizeProject(syncCurrentSceneIntoProject());
+  projectState = draft;
+  activeSceneId = draft.activeSceneId;
+  activeLevelId = draft.runtime.startingLevelId;
+  localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, JSON.stringify(draft));
+  localStorage.setItem(PROJECT_STORAGE_KEYS.legacyScene, JSON.stringify(serializeScene(world)));
+  if (announce && status) {
+    status.textContent = "Draft project saved.";
+  }
+  return draft;
+};
+
+const captureSceneAsDraft = (sceneRecord, levelRecord = null) => {
+  const nextProject = ensureProjectState();
+  const capturedScene = createSceneFromWorld(sceneRecord?.name ?? "Scene", world, {
+    id: sceneRecord?.id,
+    order: sceneRecord?.order ?? nextProject.scenes.length,
+    spawnPoint: sceneRecord?.spawnPoint,
+  });
+  let scenes = nextProject.scenes.filter((scene) => scene.id !== capturedScene.id);
+  scenes.push(capturedScene);
+  scenes = scenes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  let levels = nextProject.levels;
+  if (levelRecord) {
+    const capturedLevel = createLevelFromScene(capturedScene, {
+      id: levelRecord.id,
+      name: levelRecord.name,
+      order: levelRecord.order ?? nextProject.levels.length,
+      starting: levelRecord.starting,
+      nextLevelId: levelRecord.nextLevelId,
+      spawnPoint: levelRecord.spawnPoint ?? capturedScene.spawnPoint,
+      completionRequirement: levelRecord.completionRequirement,
+      completionSignal: levelRecord.completionSignal,
+      objectiveText: levelRecord.objectiveText,
+    });
+    levels = nextProject.levels.filter((level) => level.id !== capturedLevel.id);
+    levels.push(capturedLevel);
+    levels = levels.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  projectState = normalizeProject({
+    ...nextProject,
+    scenes,
+    levels,
+    activeSceneId: capturedScene.id,
+    runtime: {
+      ...nextProject.runtime,
+      startingLevelId:
+        nextProject.runtime.startingLevelId ??
+        levels.find((level) => level.starting)?.id ??
+        levels[0]?.id ??
+        null,
+    },
+  });
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId;
+  return projectState;
+};
+
+const loadProjectIntoEditor = (project) => {
+  const normalized = normalizeProject(project);
+  projectState = normalized;
+  activeSceneId = normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+  activeLevelId = normalized.runtime.startingLevelId ?? normalized.levels[0]?.id ?? null;
+  const activeScene = getActiveScene(normalized);
+  if (activeScene?.sceneData) {
+    setWorld(deserializeScene(activeScene.sceneData), { resetHistory: true });
+  }
+  rebuildProjectPanels();
+  updateProjectStatus();
+  return normalized;
+};
+
+const getActiveProjectScene = () => {
+  const normalized = ensureProjectState();
+  return (
+    normalized.scenes.find((scene) => scene.id === (activeSceneId ?? normalized.activeSceneId)) ??
+    normalized.scenes[0] ??
+    null
+  );
+};
+
+const getActiveProjectLevel = () => {
+  const normalized = ensureProjectState();
+  return (
+    normalized.levels.find((level) => level.id === (activeLevelId ?? normalized.runtime.startingLevelId)) ??
+    normalized.levels.find((level) => level.starting) ??
+    normalized.levels[0] ??
+    null
+  );
+};
+
+const switchProjectScene = (sceneId) => {
+  const normalized = ensureProjectState();
+  const nextScene = getSceneById(normalized, sceneId);
+  if (!nextScene) return false;
+
+  captureSceneAsDraft(
+    getActiveProjectScene() ?? normalized.scenes[0] ?? null,
+    getActiveProjectLevel()
+  );
+  activeSceneId = nextScene.id;
+  projectState = normalizeProject({
+    ...projectState,
+    activeSceneId: nextScene.id,
+  });
+  setWorld(deserializeScene(nextScene.sceneData), { resetHistory: true });
+  rebuildProjectPanels();
+  updateProjectStatus();
+  return true;
+};
+
+const switchProjectLevel = (levelId) => {
+  const normalized = ensureProjectState();
+  const nextLevel = getLevelById(normalized, levelId);
+  if (!nextLevel) return false;
+  activeLevelId = nextLevel.id;
+  activeSceneId = nextLevel.sceneId;
+  const nextScene = getSceneById(normalized, nextLevel.sceneId);
+  if (nextScene) {
+    setWorld(deserializeScene(nextScene.sceneData), { resetHistory: true });
+  }
+  rebuildProjectPanels();
+  updateProjectStatus();
+  return true;
+};
+
+const updateProjectStatus = () => {
+  if (!status) return;
+  const scene = getActiveProjectScene();
+  const level = getActiveProjectLevel();
+  const sceneLabel = scene?.name ?? "Scene";
+  const levelLabel = level?.name ?? "Level";
+  status.textContent = `${sceneLabel} / ${levelLabel}`;
+};
+
+}
 
 const loadWorldFromGltf = (asset) => {
   pushSceneHistory();
@@ -2725,21 +3876,43 @@ const loadButton = document.getElementById("loadScene");
 
 if (saveButton) {
   saveButton.addEventListener("click", () => {
-    const data = serializeScene(world);
-    localStorage.setItem("tyronScene", JSON.stringify(data));
-    status.textContent = "Scene saved to localStorage.";
+    saveDraftProject({ announce: true });
   });
 }
 
 if (loadButton) {
   loadButton.addEventListener("click", () => {
-    const raw = localStorage.getItem("tyronScene");
-    if (!raw) return;
-    pushSceneHistory();
-    const data = JSON.parse(raw);
-    const loaded = deserializeScene(data);
-    setWorld(loaded);
-    status.textContent = "Scene loaded.";
+    const rawDraft = localStorage.getItem(DRAFT_PROJECT_STORAGE_KEY);
+    const rawLegacy = localStorage.getItem(PROJECT_STORAGE_KEYS.legacyScene);
+    const loaded = loadProjectLike(rawDraft) ?? loadLegacySceneLike(rawLegacy);
+    if (!loaded) return;
+    loadProjectIntoEditor(loaded);
+    status.textContent = "Draft project loaded.";
+  });
+}
+
+if (publishButton) {
+  publishButton.addEventListener("click", () => {
+    syncCurrentSceneIntoProject();
+    const published = publishProject(projectState, { source: "published" });
+    const payload = getPublishedScenePayload(published);
+    projectState = published;
+    localStorage.setItem(PUBLISHED_PROJECT_STORAGE_KEY, JSON.stringify(payload));
+    saveDraftProject({ announce: false });
+    rebuildProjectPanels();
+    updateProjectStatus();
+    if (status) {
+      status.textContent = "Project published for client playback.";
+    }
+    const fileName = `${published.name || "tyron-project"}.json`;
+    downloadJsonFile(fileName, payload);
+  });
+}
+
+if (openPlayerButton) {
+  openPlayerButton.addEventListener("click", () => {
+    saveDraftProject({ announce: false });
+    window.open("runtime.html", "_blank");
   });
 }
 
@@ -2789,6 +3962,50 @@ document.addEventListener(
   },
   { capture: true }
 );
+
+window.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    saveDraftProject({ announce: true });
+  }
+});
+
+if (addSceneButton) {
+  addSceneButton.addEventListener("click", () => {
+    createSceneAndLevel("Scene");
+  });
+}
+
+if (duplicateSceneButton) {
+  duplicateSceneButton.addEventListener("click", () => {
+    duplicateCurrentScene();
+  });
+}
+
+if (addLevelButton) {
+  addLevelButton.addEventListener("click", () => {
+    const normalized = ensureProjectState();
+    const scene = getActiveProjectScene() ?? normalized.scenes[0] ?? null;
+    if (!scene) return;
+    const level = createLevelFromScene(scene, {
+      name: `${scene.name} ${normalized.levels.length + 1}`,
+      order: normalized.levels.length,
+      starting: normalized.levels.length === 0,
+    });
+    projectState = normalizeProject({
+      ...normalized,
+      levels: [...normalized.levels, level],
+      runtime: {
+        ...normalized.runtime,
+        startingLevelId: normalized.runtime.startingLevelId ?? level.id,
+      },
+    });
+    activeLevelId = projectState.runtime.startingLevelId;
+    rebuildProjectPanels();
+    updateProjectStatus();
+    saveDraftProject({ announce: false });
+  });
+}
 
 const assetGrid = document.getElementById("assetGrid");
 const worldGrid = document.getElementById("worldGrid");
@@ -3241,10 +4458,22 @@ window.addEventListener("beforeunload", () => {
 });
 
 setupViewportResizeSync();
+const storedDraftProject =
+  loadProjectLike(localStorage.getItem(DRAFT_PROJECT_STORAGE_KEY)) ??
+  loadLegacySceneLike(localStorage.getItem(PROJECT_STORAGE_KEYS.legacyScene));
+
+if (storedDraftProject) {
+  loadProjectIntoEditor(storedDraftProject);
+} else {
+  ensureProjectState();
+  rebuildProjectPanels();
+  updateProjectStatus();
+}
+
 renderSpriteBrowser();
 rebuildHierarchy();
 rebuildInspector();
-selectEntity(player.id);
+selectEntity(world.getEntities()[0]?.id ?? null);
 initMonaco();
 pushSceneHistory();
 animate();
