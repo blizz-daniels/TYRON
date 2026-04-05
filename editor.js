@@ -338,6 +338,7 @@ let projectState = null;
 let activeSceneId = null;
 let activeLevelId = null;
 let runtimeModeWindow = null;
+let scenePivotDragState = null;
 const sceneHistory = {
   past: [],
   future: [],
@@ -353,12 +354,153 @@ const cloneSceneData = (scene) =>
     ? structuredClone(scene)
     : JSON.parse(JSON.stringify(scene));
 
+const cloneTransformData = (transform) => ({
+  position: Array.isArray(transform?.position) ? [...transform.position] : [0, 0, 0],
+  rotation: Array.isArray(transform?.rotation) ? [...transform.rotation] : [0, 0, 0],
+  scale: Array.isArray(transform?.scale) ? [...transform.scale] : [1, 1, 1],
+});
+
+const getSceneTransformSnapshot = () =>
+  new Map(
+    world
+      .getEntities()
+      .filter((entity) => entity.components.has(ComponentType.Transform))
+      .map((entity) => [
+        entity.id,
+        cloneTransformData(entity.components.get(ComponentType.Transform)),
+      ])
+  );
+
+const vectorFromArray = (value, fallback = [0, 0, 0]) => {
+  const source = Array.isArray(value) && value.length === 3 ? value : fallback;
+  return new THREE.Vector3(
+    Number.isFinite(source[0]) ? source[0] : fallback[0],
+    Number.isFinite(source[1]) ? source[1] : fallback[1],
+    Number.isFinite(source[2]) ? source[2] : fallback[2]
+  );
+};
+
+const quaternionFromRotation = (rotation) =>
+  new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(
+      Number.isFinite(rotation?.[0]) ? rotation[0] : 0,
+      Number.isFinite(rotation?.[1]) ? rotation[1] : 0,
+      Number.isFinite(rotation?.[2]) ? rotation[2] : 0,
+      "XYZ"
+    )
+  );
+
+const rotationFromQuaternion = (quaternion) => {
+  const euler = new THREE.Euler().setFromQuaternion(quaternion, "XYZ");
+  return [euler.x, euler.y, euler.z];
+};
+
+const getScaleRatio = (nextValue, startValue) => {
+  if (!Number.isFinite(nextValue) || !Number.isFinite(startValue) || Math.abs(startValue) < 0.0001) {
+    return 1;
+  }
+  return nextValue / startValue;
+};
+
+const getActiveScenePivotEntityId = () => {
+  const scene = getActiveProjectScene();
+  const pivotEntityId = Number.isFinite(scene?.pivotEntityId) ? scene.pivotEntityId : null;
+  if (!Number.isFinite(pivotEntityId)) return null;
+  return world.getEntities().some((entity) => entity.id === pivotEntityId) ? pivotEntityId : null;
+};
+
+const isScenePivotEntity = (entityId) => entityId != null && entityId === getActiveScenePivotEntityId();
+
+const updateActiveScenePivot = (pivotEntityId, options = {}) => {
+  const normalized = ensureProjectState();
+  const sceneId = activeSceneId ?? normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+  if (!sceneId) return false;
+
+  const nextPivotEntityId = Number.isFinite(pivotEntityId) ? pivotEntityId : null;
+  const activeSceneData = cloneSceneData(serializeScene(world));
+  projectState = normalizeProject({
+    ...normalized,
+    scenes: normalized.scenes.map((scene) =>
+      scene.id === sceneId
+        ? {
+            ...scene,
+            sceneData: activeSceneData,
+            pivotEntityId: nextPivotEntityId,
+          }
+        : scene
+    ),
+  });
+  activeSceneId = projectState.activeSceneId;
+  activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+  if (options.rebuild !== false) {
+    rebuildProjectPanels();
+    rebuildInspector();
+  }
+  return true;
+};
+
+const applyScenePivotTransformFromSnapshot = (pivotEntityId, startPivot, nextPivot, snapshot) => {
+  if (!Number.isFinite(pivotEntityId) || !startPivot || !nextPivot || !(snapshot instanceof Map)) {
+    return false;
+  }
+
+  const startPosition = vectorFromArray(startPivot.position);
+  const nextPosition = vectorFromArray(nextPivot.position);
+  const startQuaternion = quaternionFromRotation(startPivot.rotation);
+  const nextQuaternion = quaternionFromRotation(nextPivot.rotation);
+  const deltaQuaternion = nextQuaternion.clone().multiply(startQuaternion.clone().invert());
+  const startScale = vectorFromArray(startPivot.scale, [1, 1, 1]);
+  const nextScale = vectorFromArray(nextPivot.scale, [1, 1, 1]);
+  const scaleRatio = new THREE.Vector3(
+    getScaleRatio(nextScale.x, startScale.x),
+    getScaleRatio(nextScale.y, startScale.y),
+    getScaleRatio(nextScale.z, startScale.z)
+  );
+
+  world.getEntities().forEach((entity) => {
+    const transform = entity.components.get(ComponentType.Transform);
+    const source = snapshot.get(entity.id);
+    if (!transform || !source) return;
+
+    if (entity.id === pivotEntityId) {
+      transform.position = [...nextPivot.position];
+      transform.rotation = [...nextPivot.rotation];
+      transform.scale = [...nextPivot.scale];
+      return;
+    }
+
+    const offset = vectorFromArray(source.position).sub(startPosition);
+    offset.multiply(scaleRatio);
+    offset.applyQuaternion(deltaQuaternion);
+    const nextEntityPosition = nextPosition.clone().add(offset);
+    const nextEntityQuaternion = deltaQuaternion
+      .clone()
+      .multiply(quaternionFromRotation(source.rotation));
+
+    transform.position = [
+      nextEntityPosition.x,
+      nextEntityPosition.y,
+      nextEntityPosition.z,
+    ];
+    transform.rotation = rotationFromQuaternion(nextEntityQuaternion);
+    transform.scale = [
+      source.scale[0] * scaleRatio.x,
+      source.scale[1] * scaleRatio.y,
+      source.scale[2] * scaleRatio.z,
+    ];
+  });
+
+  return true;
+};
+
 const captureSceneSnapshot = () => ({
   scene: cloneSceneData(serializeScene(world)),
+  pivotEntityId: getActiveScenePivotEntityId(),
 });
 
 const snapshotsMatch = (a, b) =>
-  JSON.stringify(a.scene) === JSON.stringify(b.scene);
+  JSON.stringify(a.scene) === JSON.stringify(b.scene) &&
+  (a.pivotEntityId ?? null) === (b.pivotEntityId ?? null);
 
 const updateSceneHistoryButtons = () => {
   const currentSnapshot = captureSceneSnapshot();
@@ -391,6 +533,24 @@ const restoreSceneSnapshot = (snapshot, message) => {
   sceneHistory.isRestoring = true;
   try {
     const currentSelection = selectedEntityId;
+    const normalized = ensureProjectState();
+    const sceneId = activeSceneId ?? normalized.activeSceneId ?? normalized.scenes[0]?.id ?? null;
+    if (sceneId) {
+      projectState = normalizeProject({
+        ...normalized,
+        scenes: normalized.scenes.map((scene) =>
+          scene.id === sceneId
+            ? {
+                ...scene,
+                sceneData: cloneSceneData(snapshot.scene),
+                pivotEntityId: snapshot.pivotEntityId ?? null,
+              }
+            : scene
+        ),
+      });
+      activeSceneId = projectState.activeSceneId;
+      activeLevelId = projectState.runtime.startingLevelId ?? activeLevelId;
+    }
     const restoredWorld = deserializeScene(snapshot.scene);
     const preferredSelection = restoredWorld.getEntities().some(
       (entity) => entity.id === currentSelection
@@ -398,6 +558,7 @@ const restoreSceneSnapshot = (snapshot, message) => {
       ? currentSelection
       : restoredWorld.getEntities()[0]?.id ?? null;
     setWorld(restoredWorld, { selectionId: preferredSelection });
+    rebuildProjectPanels();
     if (status && message) {
       status.textContent = message;
     }
@@ -431,6 +592,12 @@ const syncTransformComponentFromObject = (entity, object) => {
   transform.rotation = [object.rotation.x, object.rotation.y, object.rotation.z];
   transform.scale = [object.scale.x, object.scale.y, object.scale.z];
 };
+
+const getTransformDataFromObject = (object) => ({
+  position: [object.position.x, object.position.y, object.position.z],
+  rotation: [object.rotation.x, object.rotation.y, object.rotation.z],
+  scale: [object.scale.x, object.scale.y, object.scale.z],
+});
 
 const commitSelectedEntityTransform = () => {
   if (!selectedEntityId) return;
@@ -741,6 +908,12 @@ const createProjectButton = (label, onClick, className = "btn btn--ghost btn--sm
 
 function deleteEntity(entityId) {
   pushSceneHistory();
+  if (isScenePivotEntity(entityId)) {
+    updateActiveScenePivot(null, { rebuild: false });
+  }
+  if (scenePivotDragState?.entityId === entityId) {
+    scenePivotDragState = null;
+  }
   const object = meshCache.get(entityId);
   if (object) {
     engine.scene.remove(object);
@@ -906,6 +1079,45 @@ const cameraFollowPreview = new THREE.Object3D();
 
 const getEntityById = (entityId) =>
   world.getEntities().find((item) => item.id === entityId) ?? null;
+
+const getScenePivotLabel = (scene) => {
+  const pivotEntityId = Number.isFinite(scene?.pivotEntityId) ? scene.pivotEntityId : null;
+  if (!Number.isFinite(pivotEntityId)) {
+    return "Scene pivot: none";
+  }
+  if (scene?.id === activeSceneId) {
+    const entity = getEntityById(pivotEntityId);
+    if (entity) {
+      return `Scene pivot: ${entity.name}`;
+    }
+  }
+  const entityName =
+    scene?.sceneData?.entities?.find((entity) => entity?.id === pivotEntityId)?.name ??
+    `Entity ${pivotEntityId}`;
+  return `Scene pivot: ${entityName}`;
+};
+
+const setSelectedEntityAsScenePivot = (entity) => {
+  if (!entity?.components.has(ComponentType.Transform)) return false;
+  pushSceneHistory();
+  updateActiveScenePivot(entity.id);
+  if (status) {
+    status.textContent = `${entity.name} is now the scene pivot. Transforming it moves the whole scene.`;
+  }
+  return true;
+};
+
+const clearActiveScenePivot = () => {
+  const pivotEntity = getEntityById(getActiveScenePivotEntityId());
+  pushSceneHistory();
+  updateActiveScenePivot(null);
+  if (status) {
+    status.textContent = pivotEntity
+      ? `Removed ${pivotEntity.name} as the scene pivot.`
+      : "Cleared the scene pivot.";
+  }
+  return true;
+};
 
 const findScenePlayerEntity = () =>
   world.getEntities().find((item) => {
@@ -2271,16 +2483,58 @@ const rebuildInspector = () => {
   if (transform) {
     const section = document.createElement("div");
     section.innerHTML = "<label>Transform</label>";
+    const isScenePivot = isScenePivotEntity(entity.id);
+    const activePivotEntity = getEntityById(getActiveScenePivotEntityId());
+    const applyTransformFieldChange = (key, index, value) => {
+      if (isScenePivot) {
+        const startPivot = cloneTransformData(transform);
+        const nextPivot = cloneTransformData(transform);
+        nextPivot[key][index] = value;
+        applyScenePivotTransformFromSnapshot(
+          entity.id,
+          startPivot,
+          nextPivot,
+          getSceneTransformSnapshot()
+        );
+        return;
+      }
+      transform[key][index] = value;
+    };
     const position = buildVectorField("Position", transform.position, (index, value) => {
-      transform.position[index] = value;
+      applyTransformFieldChange("position", index, value);
     });
     const rotation = buildVectorField("Rotation", transform.rotation, (index, value) => {
-      transform.rotation[index] = value;
+      applyTransformFieldChange("rotation", index, value);
     });
     const scale = buildVectorField("Scale", transform.scale, (index, value) => {
-      transform.scale[index] = value;
+      applyTransformFieldChange("scale", index, value);
     });
-    section.append(position.wrapper, rotation.wrapper, scale.wrapper);
+    const pivotNote = document.createElement("p");
+    pivotNote.className = "muted";
+    if (isScenePivot) {
+      pivotNote.textContent =
+        "This entity is the scene pivot. Transforming it moves, rotates, or scales the full scene.";
+    } else if (activePivotEntity) {
+      pivotNote.textContent = `Current scene pivot: ${activePivotEntity.name}.`;
+    } else {
+      pivotNote.textContent = "No scene pivot is assigned yet.";
+    }
+    const pivotRow = document.createElement("div");
+    pivotRow.className = "row";
+    if (isScenePivot) {
+      pivotRow.appendChild(
+        createProjectButton("Remove Scene Pivot", () => {
+          clearActiveScenePivot();
+        })
+      );
+    } else {
+      pivotRow.appendChild(
+        createProjectButton("Set As Scene Pivot", () => {
+          setSelectedEntityAsScenePivot(entity);
+        })
+      );
+    }
+    section.append(pivotNote, pivotRow, position.wrapper, rotation.wrapper, scale.wrapper);
     inspectorFields.appendChild(section);
   }
 
@@ -2929,6 +3183,7 @@ const duplicateCurrentScene = (sceneId = null) => {
     ...createSceneFromWorld(`${sourceScene.name} Copy`, world, {
       order: normalized.scenes.length,
       spawnPoint: sourceScene.spawnPoint,
+      pivotEntityId: sourceScene.pivotEntityId,
     }),
     sceneData: cloneSceneData(sourceScene.sceneData),
   };
@@ -3111,6 +3366,11 @@ const renderSceneManager = () => {
     spawnLabel.className = "project-manager__meta";
     spawnLabel.textContent = `Spawn: ${scene.spawnPoint.position.map((value) => value.toFixed(2)).join(", ")}`;
     card.appendChild(spawnLabel);
+
+    const pivotLabel = document.createElement("p");
+    pivotLabel.className = "project-manager__meta";
+    pivotLabel.textContent = getScenePivotLabel(scene);
+    card.appendChild(pivotLabel);
 
     list.appendChild(card);
   });
@@ -3606,6 +3866,7 @@ const rebuildProjectPanels = () => {
 };
 
 const selectEntity = (entityId) => {
+  scenePivotDragState = null;
   if (!sceneHistory.isRestoring && selectedEntityId && selectedEntityId !== entityId) {
     commitSelectedEntityTransform();
   }
@@ -3637,6 +3898,7 @@ const selectEntity = (entityId) => {
 
 const setWorld = (newWorld, options = {}) => {
   const selectionId = options.selectionId ?? null;
+  scenePivotDragState = null;
   world = newWorld;
   engine.setWorld(newWorld);
   meshCache.clear();
@@ -3977,10 +4239,33 @@ transformControls.addEventListener("dragging-changed", (event) => {
   const entity = world.getEntities().find((item) => item.id === selectedEntityId);
   const object = meshCache.get(selectedEntityId);
   if (entity && object) {
+    const isPivotTransform = isScenePivotEntity(entity.id);
+    if (event.value && isPivotTransform) {
+      scenePivotDragState = {
+        entityId: entity.id,
+        pivotTransform: cloneTransformData(entity.components.get(ComponentType.Transform)),
+        sceneSnapshot: getSceneTransformSnapshot(),
+      };
+    }
+    if (!event.value && isPivotTransform && scenePivotDragState?.entityId === entity.id) {
+      applyScenePivotTransformFromSnapshot(
+        entity.id,
+        scenePivotDragState.pivotTransform,
+        getTransformDataFromObject(object),
+        scenePivotDragState.sceneSnapshot
+      );
+      scenePivotDragState = null;
+      rebuildInspector();
+      rebuildProjectPanels();
+      return;
+    }
     syncTransformComponentFromObject(entity, object);
     if (!event.value) {
       rebuildInspector();
     }
+  }
+  if (!event.value) {
+    scenePivotDragState = null;
   }
 });
 
@@ -3992,6 +4277,15 @@ transformControls.addEventListener("objectChange", () => {
   const entity = world.getEntities().find((item) => item.id === selectedEntityId);
   const object = meshCache.get(selectedEntityId);
   if (entity && object) {
+    if (scenePivotDragState?.entityId === entity.id && isScenePivotEntity(entity.id)) {
+      applyScenePivotTransformFromSnapshot(
+        entity.id,
+        scenePivotDragState.pivotTransform,
+        getTransformDataFromObject(object),
+        scenePivotDragState.sceneSnapshot
+      );
+      return;
+    }
     syncTransformComponentFromObject(entity, object);
   }
 });

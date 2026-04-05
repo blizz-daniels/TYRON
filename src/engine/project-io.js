@@ -30,6 +30,14 @@ const normalizeSpawnPoint = (value = {}) => ({
   entityId: Number.isFinite(value.entityId) ? value.entityId : null,
 });
 
+const normalizeScenePivotEntityId = (value, sceneData = null) => {
+  const pivotEntityId = Number.isFinite(value) ? value : null;
+  if (!Number.isFinite(pivotEntityId) || !Array.isArray(sceneData?.entities)) {
+    return pivotEntityId;
+  }
+  return sceneData.entities.some((entity) => entity?.id === pivotEntityId) ? pivotEntityId : null;
+};
+
 const normalizeHudSettings = (value = {}) => ({
   healthBar: {
     visible: value.healthBar?.visible !== false,
@@ -75,6 +83,10 @@ const normalizeSceneRecord = (scene = {}, index = 0) => {
     order: Number.isFinite(scene.order) ? scene.order : index,
     sceneData: sceneData ? cloneData(sceneData) : serializeScene(new World()),
     spawnPoint: normalizeSpawnPoint(scene.spawnPoint),
+    pivotEntityId: normalizeScenePivotEntityId(
+      scene.pivotEntityId ?? scene.scenePivotEntityId,
+      sceneData
+    ),
   };
 };
 
@@ -122,6 +134,7 @@ export const createProjectFromScene = (sceneData, options = {}) => {
       name: options.sceneName ?? "Scene 1",
       sceneData,
       spawnPoint: options.spawnPoint,
+      pivotEntityId: options.pivotEntityId,
     },
     0
   );
@@ -290,13 +303,17 @@ export const replaceProjectScene = (project, sceneId, sceneData) => {
   };
 };
 
-export const createSceneFromWorld = (name, world, options = {}) => ({
-  id: options.id ?? makeId("scene"),
-  name: name ?? "Scene",
-  order: Number.isFinite(options.order) ? options.order : 0,
-  spawnPoint: normalizeSpawnPoint(options.spawnPoint),
-  sceneData: serializeScene(world),
-});
+export const createSceneFromWorld = (name, world, options = {}) => {
+  const sceneData = serializeScene(world);
+  return {
+    id: options.id ?? makeId("scene"),
+    name: name ?? "Scene",
+    order: Number.isFinite(options.order) ? options.order : 0,
+    spawnPoint: normalizeSpawnPoint(options.spawnPoint),
+    pivotEntityId: normalizeScenePivotEntityId(options.pivotEntityId, sceneData),
+    sceneData,
+  };
+};
 
 export const createLevelFromScene = (scene, options = {}) => ({
   id: options.id ?? makeId("level"),

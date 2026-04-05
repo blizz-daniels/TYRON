@@ -76,7 +76,9 @@ const CAMERA_SELECTION_STORAGE_KEY = "tyronRuntimeCameraId";
 const DRAFT_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.draft;
 const PUBLISHED_PROJECT_STORAGE_KEY = PROJECT_STORAGE_KEYS.published;
 const PLAYER_PROGRESS_STORAGE_KEY = "tyronPlayerProgress";
+const PLAYER_SESSION_STORAGE_KEY = "tyronPlayerSession";
 const PLAYER_PREFERENCES_STORAGE_KEY = "tyronPlayerPreferences";
+const PLAYER_SESSION_AUTOSAVE_MS = 3000;
 
 document.body.dataset.runtimeMode = runtimeMode;
 
@@ -162,6 +164,18 @@ const loadPlayerPreferences = () => {
 
 const savePlayerPreferences = () => {
   localStorage.setItem(PLAYER_PREFERENCES_STORAGE_KEY, JSON.stringify(runtimePreferences));
+};
+
+const loadPlayerSession = () => {
+  try {
+    const raw = localStorage.getItem(PLAYER_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    console.warn("Failed to read player session:", error);
+    return null;
+  }
 };
 
 const refreshContinueButtonState = () => {
@@ -417,6 +431,7 @@ const setRuntimePaused = (paused, reason = "Paused") => {
 const restartCurrentLevel = () => {
   const level = getCurrentRuntimeLevel();
   if (level) {
+    clearPlayerSession();
     loadProjectLevel(level.id, { announce: false });
   }
 };
@@ -474,8 +489,10 @@ const ORBIT_POLAR_MIN = 0.4;
 const ORBIT_POLAR_MAX = Math.PI - 0.4;
 const ORBIT_RADIUS_MIN = 3;
 const ORBIT_RADIUS_MAX = 16;
+const JUMP_BUFFER_MS = 160;
 const movementState = {
   jumpPrimed: false,
+  jumpBufferUntil: 0,
 };
 const runtimeSessionState = {
   paused: false,
@@ -501,6 +518,7 @@ const runtimePreferences = {
   subtitles: true,
   touchControls: true,
 };
+let lastPlayerSessionSaveAt = 0;
 
 let playerEntity = null;
 let activeCameraEntity = null;
@@ -855,6 +873,7 @@ const createScriptApi = (entity) => {
         z: currentVelocity.z ?? 0,
       });
       movementState.jumpPrimed = true;
+      movementState.jumpBufferUntil = 0;
       return true;
     },
     startCutscene: (label = "Cutscene") => {
@@ -1555,6 +1574,7 @@ const getCameraOrbitSignature = (camera, targetEntity) =>
 const resetMovementState = (transform) => {
   if (!transform) return;
   movementState.jumpPrimed = false;
+  movementState.jumpBufferUntil = 0;
 };
 
 const preparePlayer = () => {
@@ -1562,6 +1582,7 @@ const preparePlayer = () => {
   if (!playerEntity) {
     updateHealthHud();
     movementState.jumpPrimed = false;
+    movementState.jumpBufferUntil = 0;
     return;
   }
 
@@ -1749,9 +1770,11 @@ const updateMovement = (dt) => {
       : 5.5;
     const position = physics.getTranslation(playerEntity.id);
     const grounded = Number.isFinite(position?.y) ? position.y <= 0.75 : true;
-    if (inputState.jump && !movementState.jumpPrimed && grounded) {
+    const jumpBuffered = movementState.jumpBufferUntil > performance.now();
+    if ((inputState.jump || jumpBuffered) && !movementState.jumpPrimed && grounded) {
       physics.applyImpulse(playerEntity.id, { x: 0, y: jumpSpeed, z: 0 });
       movementState.jumpPrimed = true;
+      movementState.jumpBufferUntil = 0;
     }
     if (!inputState.jump) {
       movementState.jumpPrimed = false;
@@ -1809,6 +1832,11 @@ const savePlayerProgress = (level) => {
   refreshContinueButtonState();
 };
 
+const clearPlayerSession = () => {
+  localStorage.removeItem(PLAYER_SESSION_STORAGE_KEY);
+  lastPlayerSessionSaveAt = 0;
+};
+
 const loadPlayerProgress = () => {
   try {
     const raw = localStorage.getItem(PLAYER_PROGRESS_STORAGE_KEY);
@@ -1818,6 +1846,58 @@ const loadPlayerProgress = () => {
   } catch (error) {
     console.warn("Failed to read player progress:", error);
     return null;
+  }
+};
+
+const getProjectSessionVersion = (project = runtimeSessionState.project ?? {}) => {
+  const normalized = normalizeProject(project ?? {});
+  if (Number.isFinite(normalized.published?.version)) {
+    return normalized.published.version;
+  }
+  if (Number.isFinite(normalized.metadata?.publishedVersion)) {
+    return normalized.metadata.publishedVersion;
+  }
+  return 0;
+};
+
+const canResumeSavedSession = (session, project) => {
+  if (!session || !project) return false;
+  if (!session.sceneData || typeof session.sceneData !== "object") return false;
+  const currentVersion = getProjectSessionVersion(project);
+  const savedVersion = Number.isFinite(session.projectVersion) ? session.projectVersion : 0;
+  if (runtimeMode === "client" && currentVersion !== savedVersion) {
+    return false;
+  }
+  return Boolean(getLevelById(project, session.levelId));
+};
+
+const saveRuntimeSession = ({ force = false } = {}) => {
+  if (runtimeMode !== "client") return false;
+  if (!runtimeSessionState.project || !runtimeSessionState.activeLevelId || !runtimeSessionState.activeSceneId) {
+    return false;
+  }
+
+  const now = Date.now();
+  if (!force && now - lastPlayerSessionSaveAt < PLAYER_SESSION_AUTOSAVE_MS) {
+    return false;
+  }
+
+  try {
+    localStorage.setItem(
+      PLAYER_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        levelId: runtimeSessionState.activeLevelId,
+        sceneId: runtimeSessionState.activeSceneId,
+        projectVersion: getProjectSessionVersion(runtimeSessionState.project),
+        updatedAt: now,
+        sceneData: serializeScene(world),
+      })
+    );
+    lastPlayerSessionSaveAt = now;
+    return true;
+  } catch (error) {
+    console.warn("Failed to save runtime session:", error);
+    return false;
   }
 };
 
@@ -1833,7 +1913,7 @@ const applySpawnPointToLevel = (level, scene) => {
   transform.rotation = [...spawn.rotation];
 };
 
-const loadProjectLevel = (levelId = null, { announce = true } = {}) => {
+const loadProjectLevel = (levelId = null, { announce = true, sceneOverride = null, skipSpawn = false } = {}) => {
   const normalizedProject = normalizeProject(runtimeSessionState.project ?? {});
   const level =
     (levelId ? getLevelById(normalizedProject, levelId) : getStartingLevel(normalizedProject)) ??
@@ -1859,7 +1939,8 @@ const loadProjectLevel = (levelId = null, { announce = true } = {}) => {
     return null;
   }
 
-  const loaded = deserializeScene(scene.sceneData);
+  const sceneData = sceneOverride ?? scene.sceneData;
+  const loaded = deserializeScene(sceneData);
   world = loaded;
   physics.reset();
   engine.setWorld(loaded);
@@ -1875,7 +1956,9 @@ const loadProjectLevel = (levelId = null, { announce = true } = {}) => {
   preparePlayer();
   prepareCamera();
   ensureSpriteDefaults();
-  applySpawnPointToLevel(level, scene);
+  if (!skipSpawn) {
+    applySpawnPointToLevel(level, scene);
+  }
   updateHealthHud();
   updateHudFromProject(normalizedProject);
   refreshMinimapReadout();
@@ -1894,6 +1977,7 @@ const loadProjectLevel = (levelId = null, { announce = true } = {}) => {
     cameraSelect.disabled = runtimeMode !== "preview";
   }
   savePlayerProgress(level);
+  saveRuntimeSession({ force: true });
   updateMenuCopy();
   return loaded;
 };
@@ -1933,6 +2017,7 @@ const savePreviewProject = () => {
 const startGameFromMenu = () => {
   runtimeSessionState.menuVisible = false;
   syncMenuState();
+  clearPlayerSession();
   const level = getStartingLevel(runtimeSessionState.project ?? {});
   if (level) {
     loadProjectLevel(level.id, { announce: false });
@@ -1944,12 +2029,21 @@ const continueGameFromMenu = () => {
   runtimeSessionState.menuVisible = false;
   syncMenuState();
   const progress = loadPlayerProgress();
+  const session = loadPlayerSession();
   const project = normalizeProject(runtimeSessionState.project ?? {});
-  const preferredLevel =
-    progress?.levelId ? getLevelById(project, progress.levelId) : null;
+  const resumableSession = canResumeSavedSession(session, project) ? session : null;
+  const preferredLevel = resumableSession?.levelId
+    ? getLevelById(project, resumableSession.levelId)
+    : progress?.levelId
+      ? getLevelById(project, progress.levelId)
+      : null;
   const level = preferredLevel ?? getStartingLevel(project) ?? project.levels[0] ?? null;
   if (level) {
-    loadProjectLevel(level.id, { announce: false });
+    loadProjectLevel(level.id, {
+      announce: false,
+      sceneOverride: resumableSession?.sceneData ?? null,
+      skipSpawn: Boolean(resumableSession?.sceneData),
+    });
   }
   closeStartMenu();
 };
@@ -2016,6 +2110,7 @@ const resetInputState = () => {
     inputState[key] = false;
   });
   movementState.jumpPrimed = false;
+  movementState.jumpBufferUntil = 0;
 };
 
 const shouldIgnoreGameInput = (event) => {
@@ -2029,6 +2124,9 @@ const shouldIgnoreGameInput = (event) => {
 
 const setMoveState = (action, isActive) => {
   if (!(action in inputState)) return;
+  if (action === "jump" && isActive && !inputState.jump) {
+    movementState.jumpBufferUntil = performance.now() + JUMP_BUFFER_MS;
+  }
   inputState[action] = isActive;
   if (action === "jump" && !isActive) {
     movementState.jumpPrimed = false;
@@ -2136,8 +2234,12 @@ window.addEventListener("keyup", (event) => onKeyChange(event, false));
 window.addEventListener("blur", resetInputState);
 window.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    saveRuntimeSession({ force: true });
     resetInputState();
   }
+});
+window.addEventListener("pagehide", () => {
+  saveRuntimeSession({ force: true });
 });
 
 const autoload = () => {
@@ -2357,6 +2459,10 @@ engine.addSystem(() => {
 });
 engine.addSystem(() => {
   processSceneCompletion();
+});
+engine.addSystem(() => {
+  if (!runtimeSessionState.started || runtimeSessionState.menuVisible) return;
+  saveRuntimeSession();
 });
 engine.addSystem(() => {
   applyCamera();
